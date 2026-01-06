@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Motor Thrust Test Stand</title>
+	<style>
+:root {
+    --bg-main: #0f1114;
+    --bg-panel: #181b20;
+    --bg-panel-2: #1f232a;
+    --border: #2a2f38;
+
+    --text-main: #e6e6e6;
+    --text-dim: #9aa0a6;
+
+    --accent: #d32f2f;
+    --accent-glow: rgba(211, 47, 47, 0.4);
+
+    --ok: #4caf50;
+    --warn: #ff9800;
+    --err: #f44336;
+	
+    /* Inputs & Buttons */
+    --input-bg: #1f232a;
+    --input-text: #e6e6e6;
+    --input-border: var(--border);
+
+    --button-bg: #2a2f38;
+    --button-text: #e6e6e6;
+
+    /* Panel text / labels */
+    --label-color: var(--text-dim);	
+}
+
+:root[data-theme="dark"] {
+    --bg-main: #0f1114;
+    --bg-panel: #181b20;
+    --bg-panel-2: #1f232a;
+    --border: #2a2f38;
+
+    --text-main: #e6e6e6;
+    --text-dim: #9aa0a6;
+
+    --input-bg: #1f232a;
+    --input-text: #e6e6e6;
+    --input-border: #2a2f38;
+
+    --button-bg: #2a2f38;
+    --button-text: #e6e6e6;
+}
+
+:root[data-theme="light"] {
+    --bg-main: #f2f2f2;
+    --bg-panel: #ffffff;
+    --bg-panel-2: #f7f7f7;
+    --border: #ccc;
+
+    --text-main: #111;
+    --text-dim: #555;
+
+    --input-bg: #fff;
+    --input-text: #111;
+    --input-border: #bbb;
+
+    --button-bg: #ddd;
+    --button-text: #111;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 20px;
+    background: var(--bg-main);
+    color: var(--text-main);
+    font-family: "Segoe UI", system-ui, sans-serif;
+	line-height: 1.4;
+}
+
+section {
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-panel-2));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-bottom: 25px;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.03),
+        0 10px 25px rgba(0,0,0,0.4);
+}
+
+/* ---------- Headings ---------- */
+
+h1 {
+    margin-bottom: 25px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+h2 {
+    margin: 0 0 15px 0;
+    font-size: 1.1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+}
+
+/* ---------------------------
+   Inputs, Selects, Textareas
+----------------------------*/
+input, select, textarea {
+    background-color: var(--input-bg);
+    color: var(--input-text);
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 0.95em;
+    transition: background 0.2s, color 0.2s, border 0.2s;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 4px var(--accent-glow);
+}
+
+label {
+    color: var(--label-color);
+    font-weight: 500;
+}
+
+/* ------------ Buttons -----------*/
+button {
+    background-color: var(--button-bg);
+    color: var(--button-text);
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border 0.2s;
+}
+
+button:hover {
+    background-color: var(--accent);
+    color: #fff;
+}
+
+button:active {
+    background-color: var(--accent-glow);
+	color: #fff; /* keep readable */
+}
+
+button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.button-group {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.button-group button {
+    width: 100%;
+}
+
+
+/* ------- HR --------------*/
+hr {
+	grid-column: 1 / -1;
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 10px 0;
+}
+
+
+/* -------- Grid / Layout Helpers-----*/
+
+.two-col {
+    display: grid;
+    grid-template-columns: minmax(420px, 600px) 1fr;
+    gap: 22px;
+	row-gap: 12px; 
+}
+
+@media (max-width: 900px) {
+    .two-col {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+/* ---------- Fields ---------- */
+
+.field {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+	margin-bottom: 8px;
+}
+
+.field label {
+    min-width: 140px;
+    color: var(--text-dim);
+}
+
+
+/* ---------- Range Input ---------- */
+input[type=range] {
+    flex: 1;
+    appearance: none;
+    height: 6px;
+    background: #333;
+    border-radius: 6px;
+	accent-color: var(--accent);
+}
+
+input[type=range]::-webkit-slider-thumb {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 12px var(--accent-glow);
+    cursor: pointer;
+}
+
+
+input[type=text],
+input[type=number] {
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--input-text);
+    padding: 6px 8px;
+    border-radius: 6px;
+}
+
+/* ---------- Progress ---------- */
+
+.progress-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+progress {
+    width: 100%;
+    height: 16px;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+progress::-webkit-progress-bar {
+    background-color: var(--bg-panel-2);
+    border-radius: 6px;
+}
+
+progress::-webkit-progress-value {
+    background: linear-gradient(
+        90deg,
+        var(--accent),
+        #ff5252
+    );
+	border-radius: 6px;
+    box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.test-idle {
+    opacity: 0.35;
+}
+
+
+/* ------ Sensor / Actor States ----------*/
+
+.state {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+	display: inline-block;
+	text-align: center;
+	min-width: 80px;
+    text-transform: uppercase;
+}
+
+.state-uninit { background: #ccc; color: #333; }
+.state-init { background: #2196f3; color: #fff; }
+.state-ready { background: var(--ok); color: #fff; }
+.state-error { background: var(--err); color: #fff; }
+.state-disabled { background: #9e9e9e; color: #fff; }
+
+.state-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    row-gap: 10px;
+    column-gap: 20px;
+    align-items: center;
+}
+
+
+.setup-group {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    grid-auto-flow: row;
+    gap: 10px 12px;
+    padding: 10px;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+}
+
+.setup-title {
+    grid-column: 1 / -1;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 4px;
+}
+
+.setup-row {
+    display: contents;
+}
+
+.setup-row-3 {
+    display: grid;
+    grid-template-columns: 220px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+    <h1 id="page-title">Motor Thrust Test Stand</h1>
+	<button id="themeToggle" onclick="toggleTheme()">
+    🌙 / ☀
+	</button>
+	<h2></h2>
+
+	<section id="live">
+		<h2>Live</h2>
+
+		<div class="two-col">
+			<!-- Left column -->
+			<div>
+				<div class="field">
+					<label>Throttle:</label>
+					<input type="range" id="throttle" min="0" max="100"
+						   oninput="setThrottle(this.value)">
+					<span id="throttleVal">0</span> %
+				</div>
+
+				<div class="field">
+					<label>Thrust:</label>
+					<span id="thrust">0</span> g
+				</div>
+
+				<div class="field">
+					<label>Torque:</label>
+					<span id="torque">0</span> Ncm
+				</div>
+
+				<div class="field">
+					<label>Torque Cell 1:</label>
+					<span id="torqueCell1">0</span> g
+				</div>
+
+				<div class="field">
+					<label>Torque Cell 2:</label>
+					<span id="torqueCell2">0</span> g
+				</div>
+				
+				<div class="field">
+					<label>RPM:</label>
+					<span id="rpm">0</span>
+				</div>
+			</div>
+
+			<!-- Right column -->
+			<div>
+				<div class="field">
+					<label>Voltage:</label>
+					<span id="voltage">0</span> V
+				</div>
+
+				<div class="field">
+					<label>Current:</label>
+					<span id="current">0</span> A
+				</div>
+
+				<div class="field">
+					<label>Power:</label>
+					<span id="power">0</span> W
+				</div>
+
+
+				<div class="field">
+					<label>Temperature:</label>
+					<span id="temperature">0</span> °C
+				</div>
+
+				<div class="field">
+					<label>Max Temperature:</label>
+					<span id="temperature_max">0</span> °C
+				</div>
+				
+				<div class="field button-group">
+				<button onclick="tare(event)">Tare Sensors</button>
+				<div>
+			</div>
+			</div>
+		</div>
+	</section>
+
+	
+	<section id="test">
+		<h2>Test</h2>
+
+		<div class="two-col">
+			<!-- Left column -->
+			<div>
+				<div class="field">
+					<label>Status:</label>
+					<span id="test_status">Idle</span>
+				</div>
+
+				<div class="field">
+					<label>Teststep:</label>
+					<span id="test_step">0</span> /
+					<span id="test_steps_total">0</span>
+				</div>
+
+				<div class="field progress-container">
+					<label>Progress:</label>
+					<progress id="testProgress" value="0" max="100"></progress>
+					<span id="testProgressText">0 %</span>
+				</div>
+
+				<div class="field">
+					<label>Sample Count:</label>
+					<span id="thrust_samples">0</span>
+				</div>
+
+			</div>
+
+			<!-- Right column -->
+			<div>
+				<div class="field">
+					<label for="motor_type">Motor Type:</label>
+					<input type="text" id="motor_type" placeholder="e.g. T-Motor F60 Pro">
+				</div>
+				
+				<div class="field">
+					<label for="esc_type">ESC Type:</label>
+					<input type="text" id="esc_type" placeholder="e.g. FLYCOLOR 45A">
+				</div>
+
+				<div class="field">
+					<label for="prop_type">Propeller Type:</label>
+					<input type="text" id="prop_type" placeholder="e.g. 5x4.3x3">
+				</div>
+
+				<div class="field button-group">
+					<button onclick="startTest()">Start Test</button>
+					<button onclick="stopTest()">Stop Test</button>
+					<button onclick="downloadCSV()">Download CSV</button>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	
+	<section id="system">
+		<h2>System State</h2>
+
+		<div class="two-col">
+			<!-- LEFT -->
+			<div>
+				<div class="state-grid">
+					<div>Thrust Sensor</div><span id="state-thrust" class="state">—</span>
+					<div>Torque Sensor</div><span id="state-torque" class="state">—</span>
+					<div>Thermocouple</div><span id="state-thermo" class="state">—</span>
+					<div>RPM Sensor</div><span id="state-rpm" class="state">—</span>
+					<div>Current Sensor</div><span id="state-current" class="state">—</span>
+					<div>Voltage Sensor</div><span id="state-voltage" class="state">—</span>
+				</div>
+			</div>
+
+			<!-- RIGHT (intentionally empty) -->
+			<div>
+				<div class="state-grid">
+
+					<div>Motor</div><span id="state-motor" class="state">—</span>
+					<div>Motor Mount</div><span id="state-motor-mount" class="state">—</span>
+				</div>
+
+			</div>
+		</div>
+	</section>
+
+
+	<section id="setup">
+		<h2>Setup / Calibration</h2>
+
+		<div class="two-col">
+			<!-- LEFT -->
+			<div>
+
+			<div class="setup-row-3">
+
+				<label for="maxThrottlePercent">Max Throttle:</label>
+				<input type="number" id="maxThrottlePercent" step="1">
+				<button onclick="setMaxThrottlePercent()">Set</button>
+				<hr>
+			</div>
+
+			
+			<div class="setup-row-3">
+				<label for="calFactor">Thrust Cal-Factor:</label>
+				<input type="number" id="calFactor" step="0.01">
+				<button onclick="setThrustCal()">Set</button>
+				<hr>
+			</div>
+
+			<div class="setup-group">
+				<div class="setup-title">Torque Calibration</div>
+
+				<div class="setup-row">
+					<label for="torqueCalFactor1">Torque Cal-Factor 1:</label>
+					<input type="number" id="torqueCalFactor1" step="0.01">
+				</div>
+
+				<div class="setup-row">
+					<label for="torqueCalFactor2">Torque Cal-Factor 2:</label>
+					<input type="number" id="torqueCalFactor2" step="0.01">
+				</div>
+
+				<div class="setup-row">
+					<label for="torqueDistance">Loadcell Distance (mm):</label>
+					<input type="number" id="torqueDistance" step="1">
+				</div>
+
+				<div class="setup-row">
+					<span></span>
+					<button onclick="setTorqueCalibration()">Set Torque Calibration</button>
+				</div>
+			</div>
+
+			
+			<div class="setup-row-3">
+				<hr>
+				<label for="currentSensitivity">Current Sensitivity (voltsPerAmp):</label>
+				<input type="number" id="currentSensitivity" step="0.001">
+				<button onclick="setCurrentSensitivity()">Set</button>
+				<hr>
+			</div>
+		
+			<div class="setup-group">
+				<div class="setup-title">ESC PWM Range</div>
+
+				<div class="setup-row">
+					<label for="minPulseUs">Min Pulse (µs):</label>
+					<input type="number" id="minPulseUs" step="1">
+				</div>
+
+				<div class="setup-row">
+					<label for="maxPulseUs">Max Pulse (µs):</label>
+					<input type="number" id="maxPulseUs" step="1">
+				</div>
+
+				<div class="setup-row">
+					<span></span>
+					<button onclick="setPulseRangeUs()">Set ESC PWM Range</button>
+				</div>
+				
+			</div>
+
+			</div>
+			<!-- RIGHT (empty / future use) -->
+			<div></div>
+		</div>
+	</section>
+
+<script>
+	function toggleTheme() {
+		const root = document.documentElement;
+		const current = root.getAttribute("data-theme") || "dark";
+		const next = current === "dark" ? "light" : "dark";
+		root.setAttribute("data-theme", next);
+		localStorage.setItem("theme", next);
+	}
+
+	(function initTheme() {
+		const saved = localStorage.getItem("theme") || "dark";
+		document.documentElement.setAttribute("data-theme", saved);
+	})();
+    /* -----------------------------
+       CONFIGURATION
+    ------------------------------*/
+
+    // Konfiguration beim Laden holen
+    function loadConfig() {
+        fetch('/config')
+        .then(r => {
+            if (!r.ok) throw new Error("Config fetch failed");
+            return r.json();
+        })
+        .then(cfg => {
+			/* ---------- Version ---------- */
+            if (cfg.version) {
+                document.title = "Motor Thrust Test Stand " + cfg.version;
+				const h1 = document.getElementById('page-title');
+                if (h1) {
+                    h1.textContent = "Motor Thrust Test Stand: " + cfg.version;
+                }
+            }	
+			
+            /* ---------- Thrust ---------- */
+            if (cfg.thrust_cal !== undefined) {
+                document.getElementById('calFactor').value =
+                    cfg.thrust_cal.toFixed(2);
+            }
+			
+			/* ------- Max. Thrust -------- */
+            if (cfg.thrust_max !== undefined) {
+                document.getElementById('maxThrottlePercent').value =
+                    cfg.thrust_max.toFixed(2);
+            }
+
+            /* ---------- Torque ---------- */
+            if (cfg.torque_cal1 !== undefined) {
+                document.getElementById('torqueCalFactor1').value =
+                    cfg.torque_cal1.toFixed(2);
+            }
+
+            if (cfg.torque_cal2 !== undefined) {
+                document.getElementById('torqueCalFactor2').value =
+                    cfg.torque_cal2.toFixed(2);
+            }
+
+            if (cfg.torque_dist !== undefined) {
+                document.getElementById('torqueDistance').value =
+                    cfg.torque_dist.toFixed(0);
+            }
+
+			/* ---------- Current ---------- */
+            if (cfg.current_sensitivity !== undefined) {
+                document.getElementById('currentSensitivity').value =
+                    cfg.current_sensitivity.toFixed(4);
+            }
+			
+			/* ---------- Motor/ESC ---------- */			
+            if (cfg.minPulseUs !== undefined) {
+                document.getElementById('minPulseUs').value =
+                    cfg.minPulseUs.toFixed(0);
+            }
+
+            if (cfg.maxPulseUs !== undefined) {
+                document.getElementById('maxPulseUs').value =
+                    cfg.maxPulseUs.toFixed(0);
+            }			
+        })
+        .catch(err => {
+            console.warn("Failed to load config:", err);
+        });
+    }
+	
+	function setMaxThrottlePercent() {
+		const val = parseFloat(document.getElementById('maxThrottlePercent').value) || 0;
+
+		// Prüfen auf gültigen Bereich (optional)
+		if (val < 0 || val > 100) {
+			alert("Max Throttle muss zwischen 0 und 100 liegen.");
+			return;
+		}
+
+		const params = new URLSearchParams();
+		params.append('thrust_max', val);
+
+		fetch('/config', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded'
+			},
+			body: params.toString()
+		})
+		.then(r => {
+			if (!r.ok) throw new Error("Save failed");
+			alert("Max Throttle saved: " + val + "%");
+		})
+		.catch(err => {
+			alert("Fehler beim Speichern");
+			console.error(err);
+		});
+	}
+	
+	function setCurrentSensitivity() {
+		const val = parseFloat(document.getElementById('currentSensitivity').value) || 0;
+
+
+		const params = new URLSearchParams();
+		params.append('current_sensitivity', val);
+
+		fetch('/config', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded'
+			},
+			body: params.toString()
+		})
+		.then(r => {
+			if (!r.ok) throw new Error("Save failed");
+			alert("Current Sensitivity stored: " + val + "%");
+		})
+		.catch(err => {
+			alert("Fehler beim Speichern");
+			console.error(err);
+		});
+	}	
+	
+	
+
+	function tare(event) {
+		const btn = event.target;
+		btn.disabled = true;
+
+		fetch('/tare', { method: 'POST' })
+			.then(response => {
+				if (!response.ok) {
+					throw new Error('Tare failed');
+				}
+				return response.text();
+			})
+			.then(text => {
+				console.log('Tare response:', text);
+				alert('Sensors tared successfully');
+			})
+			.catch(err => {
+				console.error(err);
+				alert('Error taring sensors');
+			})
+			.finally(() => {
+				btn.disabled = false;
+			});
+	}
+    // Thrust Loadcell Cal-Factor setzen
+    function setThrustCal() {
+        const val = document.getElementById('calFactor').value;
+
+        fetch('/config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: 'thrust_cal=' + encodeURIComponent(val)
+        })
+        .then(r => {
+            if (!r.ok) throw new Error("Save failed");
+            alert("Cal-Factor gespeichert");
+        })
+        .catch(err => {
+            alert("Fehler beim Speichern");
+            console.error(err);
+        });
+    }
+	
+	function setTorqueCalibration() {
+		const cal1 = parseFloat(document.getElementById('torqueCalFactor1').value) || 0;
+		const cal2 = parseFloat(document.getElementById('torqueCalFactor2').value) || 0;
+		const dist = parseFloat(document.getElementById('torqueDistance').value) || 0;
+
+		const params = new URLSearchParams();
+		params.append('torqueCal1', cal1);
+		params.append('torqueCal2', cal2);
+		params.append('torqueDistance', dist);
+
+		fetch('/config', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded'
+			},
+			body: params.toString()
+		})
+		.then(r => {
+			if (!r.ok) throw new Error("Save failed");
+			alert("Torque-Kalibrierung gespeichert");
+		})
+		.catch(err => {
+			alert("Fehler beim Speichern");
+			console.error(err);
+		});
+	}
+	
+	function setPulseRangeUs() {
+		const minPulseUs = parseInt(document.getElementById('minPulseUs').value) || 0;
+		const maxPulseUs = parseInt(document.getElementById('maxPulseUs').value) || 0;
+
+		const params = new URLSearchParams();
+		params.append('minPulseUs', minPulseUs);
+		params.append('maxPulseUs', maxPulseUs);
+
+		fetch('/config', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded'
+			},
+			body: params.toString()
+		})
+		.then(r => {
+			if (!r.ok) throw new Error("Save failed");
+			alert("ESC Settings saved");
+		})
+		.catch(err => {
+			alert("Fehler beim Speichern");
+			console.error(err);
+		});
+	}
+
+    /* -----------------------------
+       LIVE STATUS
+    ------------------------------*/
+
+    function fetchStatus() {
+        fetch('/status')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('thrust').innerText = data.thrust.toFixed(2);
+                document.getElementById('torque').innerText = data.torque.toFixed(2);
+				document.getElementById('torqueCell1').innerText = data.torqueCell1.toFixed(2);
+				document.getElementById('torqueCell2').innerText = data.torqueCell2.toFixed(2);
+                document.getElementById('voltage').innerText = data.voltage.toFixed(2);
+                document.getElementById('current').innerText = data.current.toFixed(2);
+                document.getElementById('power').innerText = data.power.toFixed(2);
+                document.getElementById('rpm').innerText = data.rpm.toFixed(0);
+                document.getElementById('temperature').innerText = data.temperature.toFixed(2);
+                document.getElementById('temperature_max').innerText = data.temperature_max.toFixed(2);
+                document.getElementById('thrust_samples').innerText = data.thrust_samples;
+
+                document.getElementById('throttleVal').innerText =
+                    data.throttle.toFixed(1);
+                document.getElementById('throttle').value =
+                    data.throttle.toFixed(1);
+					
+				/* ---------- Test Status ---------- */
+				if (data.test_running !== undefined) {
+
+					document.getElementById('test_status').innerText =
+						data.test_running ? "Running" : "Idle";
+
+					document.getElementById('test_step').innerText =
+						data.test_step ?? 0;
+
+					document.getElementById('test_steps_total').innerText =
+						data.test_steps_total ?? 0;
+
+					const progress = Math.max(0, Math.min(100, data.test_progress ?? 0));
+
+					document.getElementById('testProgress').value = progress;
+					document.getElementById('testProgressText').innerText =
+						progress.toFixed(0) + " %";
+
+					// visually dim when idle
+					document.getElementById('testProgress').classList.toggle(
+						'test-idle',
+						!data.test_running
+					);
+				}
+            })
+            .catch(err => {
+                console.warn("Status fetch failed:", err);
+            });
+    }
+
+    setInterval(fetchStatus, 500);
+
+	/* -----------------------------
+	   SYSTEM STATE MAPPING
+	------------------------------*/
+
+	const SensorStateMap = {
+		0: { text: "Uninitialized", css: "state-uninit" },
+		1: { text: "Initializing",  css: "state-init" },
+		2: { text: "Ready",         css: "state-ready" },
+		3: { text: "Error",         css: "state-error" },
+		4: { text: "Disabled",      css: "state-disabled" }
+	};
+
+	function updateStateElement(id, stateValue) {
+		const el = document.getElementById(id);
+		if (!el || stateValue === undefined) return;
+
+		const map = SensorStateMap[stateValue] ||
+					{ text: "Unknown", css: "state-uninit" };
+
+		el.textContent = map.text;
+		el.className = "state " + map.css;
+	}
+	
+	const MotorMountStateMap = {
+		0: { text: "Disarmed", css: "state-uninit" },
+		1: { text: "Arming",  css: "state-init" },
+		2: { text: "Armed",  css: "state-ready" },
+		3: { text: "Running", css: "state-ready" }
+	};
+
+	function updateMountStateElement(id, stateValue) {
+		const el = document.getElementById(id);
+		if (!el || stateValue === undefined) return;
+
+		const map = MotorMountStateMap[stateValue] ||
+					{ text: "Unknown", css: "state-uninit" };
+
+		el.textContent = map.text;
+		el.className = "state " + map.css;
+	}
+	
+	const ActuatorStateMap = {
+		0: { text: "Uninitialized", css: "state-uninit" },
+		1: { text: "Initializing",  css: "state-init" },
+		2: { text: "Ready",         css: "state-ready" },
+		3: { text: "Active",        css: "state-ready" },
+		4: { text: "Stopped",       css: "state-ready" },
+		5: { text: "Error",         css: "state-error" },
+		6: { text: "Disabled",      css: "state-disabled" },
+		7: { text: "E-Stop",      css: "state-error" }
+	};	
+	
+	function updateActuatorElement(id, stateValue) {
+		const el = document.getElementById(id);
+		if (!el || stateValue === undefined) return;
+
+		const map = ActuatorStateMap[stateValue] ||
+					{ text: "Unknown", css: "state-uninit" };
+
+		el.textContent = map.text;
+		el.className = "state " + map.css;
+	}
+	
+	function fetchSystemState() {
+		fetch('/system')
+			.then(r => r.json())
+			.then(s => {
+
+				updateStateElement("state-thrust", s.thrust);
+				updateStateElement("state-torque", s.torque);
+				updateStateElement("state-thermocouple", s.thermocouple);
+				updateStateElement("state-rpm", s.rpm);
+				updateStateElement("state-current", s.current);
+				updateStateElement("state-voltage", s.voltage);
+
+				updateActuatorElement("state-motor", s.motor);
+				updateMountStateElement("state-motor-mount", s.motor_mount);
+
+			})
+			.catch(err => {
+				console.warn("System state fetch failed:", err);
+			});
+	}
+	
+	setInterval(fetchSystemState, 1000);
+
+    /* -----------------------------
+       STEUERUNG
+    ------------------------------*/
+
+    function setThrottle(val) {
+        document.getElementById('throttleVal').innerText = val;
+
+        fetch('/setThrottle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: 'throttle=' + encodeURIComponent(val)
+        });
+    }
+
+	function startTest() {
+		const motorType = document.getElementById("motor_type").value;
+		const escType = document.getElementById("esc_type").value;
+		const propType  = document.getElementById("prop_type").value;
+
+		const params = new URLSearchParams();
+		params.append("motorType", motorType);
+		params.append("escType", escType);
+		params.append("propellerType", propType);
+
+		fetch("/api/test/metadata", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/x-www-form-urlencoded"
+			},
+			body: params.toString()
+		});
+
+		fetch("/api/test/start", { method: "POST" });
+	}
+
+    function stopTest() {
+        fetch('/api/test/stop', { method: 'POST' });
+    }
+
+    function downloadCSV() {
+        window.location.href = '/downloadCSV';
+    }
+	
+	function loadTestMetadata() {
+		fetch("/api/test/metadata")
+		.then(r => {
+			if (!r.ok) throw new Error("Test Metadata fetch failed");
+			return r.json();
+		})
+		.then(cfg => {
+			if (cfg.motorType) {
+				document.getElementById("motor_type").value=cfg.motorType;
+			}		
+			if (cfg.escType) {
+				document.getElementById("esc_type").value=cfg.escType;
+			}	
+			if (cfg.propellerType) {
+				document.getElementById("prop_type").value=cfg.propellerType;
+			}
+		})			
+		.catch(err => {
+			console.warn("Failed to load Test Metadata:", err);
+		});
+
+	}
+
+		
+
+    /* -----------------------------
+       INIT
+    ------------------------------*/
+    window.onload = () => {
+		document.getElementById('throttle').value = 0;
+		document.getElementById('throttleVal').innerText = "0";
+        loadConfig();
+		loadTestMetadata();
+        fetchStatus();
+		fetchSystemState();
+    };
+</script>
+
+
+</body>
+
+</html>
