@@ -4,6 +4,12 @@ An ESP32-based brushless motor thrust test stand for measuring, logging, and ana
 
 The system controls a brushless ESC, reads multiple sensors in real time, performs automated thrust test sequences, and exports results as CSV files for further analysis.
 
+This project was inspired by:  
+https://github.com/avenhaus/thrust_stand/tree/main
+
+https://github.com/iforce2d/thrustTester
+
+https://www.tytorobotics.com/pages/series-1580-1585
 ---
 
 ## Features
@@ -96,19 +102,21 @@ Web-based control and visualization layer:
 
 ### ESP32-S3 WROOM-1 Pin Mapping
 
+Note: All sensors are connected on 3.3V to ESP32 board.
+
 | GPIO | Signal / Name | Direction | Connected Hardware | Notes |
 |-----:|---------------|-----------|--------------------|-------|
 | 0* | BOOT | Input | Boot button | Strapping pin |
-| 1 | CURRENT_SENSOR_PIN | Input (ADC) | ACS758 current sensor | Current measurement |
+| 1 | CURRENT_SENSOR_PIN | Input (ADC) | ACS758 current sensor OU2| Current measurement |
 | 2 | VOLTAGE_SENSOR_PIN | Input (ADC) | Voltage divider (10k / 1k) | Max ~33 V |
-| 4 | HX711_DOUT_1_PIN | Input | HX711 #1 (Thrust, 5 kg) | Data |
-| 5 | HX711_SCK_1_PIN | Output | HX711 #1 (Thrust, 5 kg) | Clock |
-| 6 | HX711_DOUT_2_PIN | Input | HX711 #2 (Torque cell 1, 2 kg) | Data |
-| 7 | HX711_SCK_2_PIN | Output | HX711 #2 (Torque cell 1, 2 kg) | Clock |
-| 13 | RPM_SENSOR_PIN | Input | IR reflective RPM sensor | Digital pulse input |
+| 4 | HX711_DOUT_1_PIN | Input | HX711 #1 (Thrust, 5 kg) | Data DT|
+| 5 | HX711_SCK_1_PIN | Output | HX711 #1 (Thrust, 5 kg) | Clock SCK|
+| 6 | HX711_DOUT_2_PIN | Input | HX711 #2 (Torque cell 1, 2 kg) | Data DT|
+| 7 | HX711_SCK_2_PIN | Output | HX711 #2 (Torque cell 1, 2 kg) | Clock SCK|
+| 13 | RPM_SENSOR_PIN | Input | IR reflective RPM sensor | Digital pulse input DOUT |
 | 14 | MOTOR_ESC_PIN | Output (PWM) | Brushless ESC | Throttle control |
-| 15 | HX711_DOUT_3_PIN | Input | HX711 #3 (Torque cell 2, 2 kg) | Data |
-| 16 | HX711_SCK_3_PIN | Output | HX711 #3 (Torque cell 2, 2 kg) | Clock |
+| 15 | HX711_DOUT_3_PIN | Input | HX711 #3 (Torque cell 2, 2 kg) | Data DT|
+| 16 | HX711_SCK_3_PIN | Output | HX711 #3 (Torque cell 2, 2 kg) | Clock SCK|
 | 17 | MAX31855_CS_PIN | Output | MAX31855 thermocouple | SPI chip select |
 | 38 / 48 | RGB_BUILTIN_LED | Output | Onboard RGB LED | Status indication |
 | 41 | I2C_SCL | I/O | I2C bus | Optional |
@@ -119,6 +127,25 @@ Web-based control and visualization layer:
 
 * Strapping pins: GPIO 0, 3, 45, 46. Avoid changing their state during boot.
 
+### Wiring Load Cells to HX711 board
+
+|Wire Color | HX711 board |
+| red | E+ |
+| black | E- |
+| green | A- |
+| white | A+ |
+| n.c. | B- |
+| n.c. | B+ |
+
+###Wiring Infrared Sensor
+
+| Signal / Name  | TCRT5000 IR Infrared board |
+|  3.3V white  | Vcc |
+|  Ground brown  | GND |
+| D0 green  | D0ut |
+| A0 yellow (n.c.)  | A0 |
+
+
 ---
 
 ## Media
@@ -128,9 +155,12 @@ Image files are stored in the `media/` directory using a consistent naming schem
 - Overall test stand  
   ![Test Stand Overview](media/thruststand_overview.jpg)
 
-- ESP32 and sensor electronics  
-  ![ESP32 and Sensor Electronics](media/thruststand_esp32_electronics.jpg)
-
+- ESP32 Adapter and sensor electronics Top View  
+  ![ESP32 and Sensor Electronics](media/thruststand_esp32_electronics_top.jpg)
+  
+- ESP32 Adapter and sensor electronics Bottom View  
+  ![ESP32 and Sensor Electronics](media/thruststand_esp32_electronics_buttom.jpg)
+  
 - Infrared RPM sensor detail  
   ![Infrared RPM Sensor](media/thruststand_rpm_sensor.jpg)
 
@@ -172,8 +202,12 @@ Data is buffered in memory during the test and written to LittleFS as a CSV file
 - Libraries:
   - ESPAsyncWebServer
   - AsyncTCP
-  - HX711
+  - HX711_ADC@^1.2.12
+  - adafruit/Adafruit ADS1X15@^2.5.0
+  - adafruit/Adafruit MAX31855 library@^1.4.2
+  - robtillaart/INA226@^0.6.4
   - LittleFS
+
 
 ---
 
