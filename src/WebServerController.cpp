@@ -1,5 +1,5 @@
 #include "WebServerController.h"
-#include "Version.h"
+#include "Config.h"
 
 WebServerController::WebServerController(ThrustStand *stand, ThrustTestController *controller)
 {
@@ -105,7 +105,8 @@ snprintf(buf, sizeof(buf),
             "\"torqueCell2\":%.2f,"
             "\"voltage\":%.2f,"
             "\"current\":%.2f,"
-             "\"power\":%.2f,"           
+             "\"power\":%.2f," 
+             "\"thrust_ratio\":%.2f,"   
             "\"rpm\":%.0f,"
             "\"temperature\":%.2f,"
             "\"temperature_max\":%.2f,"
@@ -124,6 +125,7 @@ snprintf(buf, sizeof(buf),
         d.voltage,
         d.current,
         d.power,
+        d.thrust_ratio,
         d.rpm,
         d.temperature,
         d.temperature_max,
@@ -180,6 +182,12 @@ snprintf(buf, sizeof(buf),
                   response->printf(
                       ",\"current_sensitivity\": %.4f", currentSensitivity);
 
+                  /* ----------Voltage ---------- */
+                  float voltageCalibration =
+                      thrustStand->getVoltageCalibrationFactor();
+                  response->printf(
+                      ",\"voltage_calibration\": %.4f", voltageCalibration);
+
                   /* ---------- Motor PWM Range ---------- */
                   uint16_t minPulseUs =
                       thrustStand->getMinPulseUs();
@@ -199,6 +207,7 @@ snprintf(buf, sizeof(buf),
               [this](AsyncWebServerRequest *request)
               {
                   const TestMetadata_t &md = testController->getMetadata();
+                  const CsvFormat_t &csv = testController->getCsvFormat();
 
                   AsyncResponseStream *response =
                       request->beginResponseStream("application/json");
@@ -211,8 +220,11 @@ snprintf(buf, sizeof(buf),
                       "\"escType\": \"%s\",",
                       md.escType.c_str());
                   response->printf(
-                      "\"propellerType\": \"%s\"",
+                      "\"propellerType\": \"%s\",",
                       md.propellerType.c_str());
+                  response->printf(
+                      "\"csvFormat\":\"%s\"",
+                      csv.format);
                   response->print("}");
 
                   request->send(response);
@@ -288,6 +300,17 @@ snprintf(buf, sizeof(buf),
                       handled = true;
                   }
 
+                  /* ---------- Volate Calibration ---------- */
+                  if (request->hasParam("voltage_calibration", true))
+                  {
+                      float voltage_calibration = request->getParam("voltage_calibration", true)->value().toFloat();
+                      thrustStand->setVoltageCalibrationFactor(voltage_calibration);
+                      ESP_LOGI("setupRoutes",
+                               "setVoltageCalibrationFactor:%.2f",
+                               voltage_calibration);
+                      handled = true;
+                  }
+
                   /* ---------- Motor PWM Range ---------- */
 
                   if (request->hasParam("minPulseUs", true))
@@ -312,12 +335,42 @@ snprintf(buf, sizeof(buf),
                       request->send(400, "text/plain", "Missing or invalid parameters");
                   }
               });
+
+    server.on("/calibrate_current", HTTP_POST, [this](AsyncWebServerRequest *request)
+              {
+    if (!request->hasParam("actual_current", true)) {
+        request->send(400, "text/plain", "Missing actual_current");
+        return;
+    }
+
+    float actual = request->getParam("actual_current", true)->value().toFloat();
+    float measured = NAN;
+
+    if (request->hasParam("measured_current", true)) {
+        measured = request->getParam("measured_current", true)->value().toFloat();
+    }
+
+    thrustStand->autoCalibrateCurrentSensor(actual, measured);
+
+    float newSens = thrustStand->getCurrentSensitivity();
+
+    request->send(200, "application/json",
+        String("{\"currentSensitivity\":") + String(newSens, 6) + "}"); });
+
     // Tare
     server.on("/tare", HTTP_POST, [this](AsyncWebServerRequest *request)
               {
-                ESP_LOGI("WebServerController", "tareSensors");
-        thrustStand->tareSensors();
-        request->send(200, "text/plain", "OK"); });
+    bool success = thrustStand->tareSensors();
+    ESP_LOGI("WebServerController", "tareSensors -> %s", success ? "OK" : "FAILED");
+
+    if (success)
+    {
+        request->send(200, "text/plain", "OK");
+    }
+    else
+    {
+        request->send(500, "text/plain", "TARE_FAILED");
+    } });
 
     // CSV Download
     server.on("/downloadCSV", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -368,6 +421,12 @@ snprintf(buf, sizeof(buf),
                       request->arg("motorType"),
                       request->arg("escType"),
                       request->arg("propellerType"));
+
+                  if (request->hasParam("csvFormat", true))
+                  {
+                      testController->setCsvFormat(
+                          request->getParam("csvFormat", true)->value().c_str());
+                  }
 
                   if (!ok)
                   {

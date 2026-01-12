@@ -2,8 +2,7 @@
 #include <esp_log.h>
 #include <pgmspace.h>
 #include <freertos/semphr.h>
-#include "Version.h"
-#include "pinOut.h"
+#include "Config.h"
 #include "ThrustStand.h"
 #include "ThrustTestController.h"
 #include "WebServerController.h"

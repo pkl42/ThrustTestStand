@@ -183,15 +183,6 @@ public:
     };
 
     /**
-     * @brief Calibrate the ESC throttle range.
-     *
-     * Forces a full-scale calibration sequence.
-     *
-     * @warning Motor must be mechanically safe or disconnected.
-     */
-    void calibrate(uint16_t calibTimeMs = 5000);
-
-    /**
      * @brief Get the current ESC state.
      *
      * @return Current EscState.

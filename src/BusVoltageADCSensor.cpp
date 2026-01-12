@@ -63,6 +63,8 @@ bool BusVoltageADC::update()
 
     uint32_t raw = adc1_get_raw(_adcChannel);
     float voltage = adcToVoltage(raw);
+    // Apply calibration (ADC + resistor tolerance)
+    voltage *= _calibrationFactor;
 
     xSemaphoreTake(_mutex, 0);
     _voltage = voltage;
@@ -89,11 +91,11 @@ float BusVoltageADC::adcToVoltage(uint32_t raw)
     if (_adcCalibrated)
     {
         uint32_t mv = esp_adc_cal_raw_to_voltage(raw, &_adcChars);
-        v = (mv / 1000.0f) * _scale;
+        v = (mv / 1000.0f) * _dividerRatio;
     }
     else
     {
-        v = ((raw / 4095.0f) * 3.3f) * _scale;
+        v = ((raw / 4095.0f) * 3.3f) * _dividerRatio;
     }
     return v;
 }
@@ -102,5 +104,15 @@ void BusVoltageADC::setResistorvalues(float rTop, float rBottom)
 {
     _rTop = rTop;
     _rBottom = rBottom;
-    _scale = (_rTop + _rBottom) / _rBottom;
+    _dividerRatio = (_rTop + _rBottom) / _rBottom;
+}
+
+bool BusVoltageADC::setCalibrationFactor(float calibrationFactor)
+{
+    if (calibrationFactor > 0.9f && calibrationFactor < 1.1f) // sanity range
+    {
+        _calibrationFactor = calibrationFactor;
+        return true;
+    }
+    return false;
 }

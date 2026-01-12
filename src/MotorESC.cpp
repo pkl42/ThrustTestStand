@@ -210,22 +210,6 @@ void MotorESC::forceStopHardware()
     _state = EscState::DISARMED;
 }
 
-void MotorESC::calibrate(uint16_t calibTimeMs)
-{
-    emergencyStop("ESC calibration requires safe state");
-    _state = EscState::DISARMED;
-
-    ESP_LOGW(TAG, "REMOVE PROPELLERS – ESC calibration");
-
-    setPulseWidth(_maxPulseUs);
-    delay(calibTimeMs);
-
-    setPulseWidth(_minPulseUs);
-    delay(calibTimeMs);
-
-    resetEmergencyStop();
-}
-
 bool MotorESC::isAtTargetSpeed(float tolerance) const
 {
     return fabs(_currentThrottle - _targetThrottle) <= tolerance;

@@ -1,10 +1,7 @@
 #include <Preferences.h>
-#include <LittleFS.h>
-
+#include "ThrustStand.h"
 #include "ThrustTestController.h"
-
 #include "esp_log.h"
-#include "Version.h"
 
 const char *ThrustTestController::TAG = "ThrustTest";
 
@@ -36,10 +33,10 @@ bool ThrustTestController::startTest()
     if (_status.running)
         return false;
 
-    if (metadata.motorType.isEmpty() || metadata.propellerType.isEmpty())
+    if (_config.metadata.motorType.isEmpty() || _config.metadata.propellerType.isEmpty())
         return false;
 
-    stand.tareSensors();
+    bool success = stand.tareSensors();
     stand.setControlMode(ThrottleControlMode::AUTOMATIC);
     stand.resetCumulativeData(); // Reset stats in the stand
     _status.step = 0;
@@ -74,7 +71,7 @@ void ThrustTestController::stopTest(bool storeTestData)
     if (storeTestData)
     {
         ESP_LOGI(TAG, "Test completed and test data stored");
-        write_csv_to_littlefs("/last_test.csv", _status.total_steps);
+        write_csv_to_littlefs("/last_test.csv", _status.total_steps, _config.csvFormat.format);
     }
     else
     {
@@ -154,56 +151,92 @@ void ThrustTestController::runTest()
     stand.setThrottle(throttle, true, _step_accel_time_ms, ThrottleSource::TEST);
 }
 
-bool ThrustTestController::write_csv_to_littlefs(const char *path, uint32_t numberOfRecords)
+void ThrustTestController::printFloat(File &f, float value, int precision, char decimalSep)
 {
+    char buf[32];
+    dtostrf(value, 0, precision, buf);
+
+    if (decimalSep != '.')
+    {
+        for (char *p = buf; *p; ++p)
+        {
+            if (*p == '.')
+            {
+                *p = decimalSep;
+                break;
+            }
+        }
+    }
+
+    f.print(buf);
+}
+
+bool ThrustTestController::write_csv_to_littlefs(const char *path,
+                                                 uint32_t numberOfRecords,
+                                                 const char *csvFormat)
+{
+
     File f = LittleFS.open(path, "w");
     if (!f)
         return false;
 
+    char decimalSep = csvFormat[0];
+    char fieldSep = csvFormat[1];
+
     /* ---------- Metadata header ---------- */
     f.println("# ==================================");
-    f.printf("# Application: %s\n", THRUSTSTAND_APP_NAME);
-    f.printf("# AppVersion: %s\n", THRUSTSTAND_APP_VERSION);
-    f.printf("# CSVVersion: %s\n", THRUSTSTAND_CSV_VERSION);
-    f.printf("# Build: %s\n", THRUSTSTAND_BUILD_DATE);
-    f.printf("# MotorType: %s\n", metadata.motorType.c_str());
-    f.printf("# ESCType: %s\n", metadata.escType.c_str());
-    f.printf("# PropellerType: %s\n", metadata.propellerType.c_str());
+    f.printf("# Application   : %s\n", THRUSTSTAND_APP_NAME);
+    f.printf("# AppVersion    : %s\n", THRUSTSTAND_APP_VERSION);
+    f.printf("# CSVVersion    : %s\n", THRUSTSTAND_CSV_VERSION);
+    f.printf("# Build         : %s\n", THRUSTSTAND_BUILD_DATE);
+    f.printf("# Motor Type    : %s\n", _config.metadata.motorType.c_str());
+    f.printf("# ESC Type      : %s\n", _config.metadata.escType.c_str());
+    f.printf("# Propeller Type: %s\n", _config.metadata.propellerType.c_str());
     // f.printf("# Records: %lu\n", (unsigned long)numberOfRecords);
     // f.printf("# Generated: %lu\n", (unsigned long)millis());
     f.println("# ==================================");
 
-    f.println(
-        "step,"
-        "throttle_pct,"
-        "thrust_g,"
-        "torque_Ncm,"
-        "voltage_V,"
-        "current_A,"
-        "power_W,"
-        "rpm,"
-        "g/W,"
-        "temp_C,"
-        "temp_max_C");
+    f.printf(
+        "step%c"
+        "throttle_pct%c"
+        "thrust_g%c"
+        "torque_Ncm%c"
+        "voltage_V%c"
+        "current_A%c"
+        "power_W%c"
+        "rpm%c"
+        "g/W%c"
+        "temp_C%c"
+        "temp_max_C\n",
+        fieldSep, fieldSep, fieldSep, fieldSep, fieldSep,
+        fieldSep, fieldSep, fieldSep, fieldSep, fieldSep);
 
-    for (int i = 0; i < numberOfRecords + 1; i++)
+    for (uint32_t i = 0; i < numberOfRecords; i++)
     {
         const auto &d = test_data[i];
-        f.printf(
-            "%d,%.1f,%.3f,%.3f,%.2f,%.2f,%.2f,%.1f,%.1f,%.1f,,%.2f\n",
-            i,
-            d.throttle,
-            d.thrust,
-            d.torque,
-            d.voltage,
-            d.current,
-            d.power,
-            d.rpm,
-            (d.thrust / d.power),
-            d.temperature,
-            d.temperature_max
 
-        );
+        f.print(i);
+        f.print(fieldSep);
+        printFloat(f, d.throttle, 1, decimalSep);
+        f.print(fieldSep);
+        printFloat(f, d.thrust, 3, decimalSep);
+        f.print(fieldSep);
+        printFloat(f, d.torque, 3, decimalSep);
+        f.print(fieldSep);
+        printFloat(f, d.voltage, 2, decimalSep);
+        f.print(fieldSep);
+        printFloat(f, d.current, 2, decimalSep);
+        f.print(fieldSep);
+        printFloat(f, d.power, 2, decimalSep);
+        f.print(fieldSep);
+        printFloat(f, d.rpm, 0, decimalSep);
+        f.print(fieldSep);
+        printFloat(f, d.thrust / d.power, 2, decimalSep);
+        f.print(fieldSep);
+        printFloat(f, d.temperature, 1, decimalSep);
+        f.print(fieldSep);
+        printFloat(f, d.temperature_max, 2, decimalSep);
+        f.println();
     }
 
     f.close();
@@ -234,10 +267,25 @@ bool ThrustTestController::setMetadata(const String &motor,
         return false; // metadata is immutable while running
     }
 
-    metadata.motorType = motor;
-    metadata.escType = escType;
-    metadata.propellerType = prop;
+    _config.metadata.motorType = motor;
+    _config.metadata.escType = escType;
+    _config.metadata.propellerType = prop;
     saveConfig();
+    return true;
+}
+
+bool ThrustTestController::setCsvFormat(const char *format, bool saveConfigFlag)
+{
+    if (!format || strlen(format) != 2)
+        return false;
+
+    ESP_LOGI(TAG, "setCsvFormat: %s", format);
+
+    _config.csvFormat.format[0] = format[0];
+    _config.csvFormat.format[1] = format[1];
+    _config.csvFormat.format[2] = '\0';
+    if (saveConfigFlag)
+        saveConfig();
     return true;
 }
 
@@ -258,9 +306,15 @@ void ThrustTestController::loadConfig()
     if (!prefs.isKey("propellerType"))
         prefs.putString("propellerType", "Propeller Type");
 
-    metadata.motorType = prefs.getString("motorType");
-    metadata.escType = prefs.getString("escType");
-    metadata.propellerType = prefs.getString("propellerType");
+    _config.metadata.motorType = prefs.getString("motorType");
+    _config.metadata.escType = prefs.getString("escType");
+    _config.metadata.propellerType = prefs.getString("propellerType");
+
+    if (!prefs.isKey("csvFormat"))
+        prefs.putString("csvFormat", ",;"); // German Excel Style
+
+    String fmt = prefs.getString("csvFormat", ".;");
+    setCsvFormat(fmt.c_str(), false); // reuse validation logic
 
     prefs.end();
 }
@@ -268,9 +322,11 @@ void ThrustTestController::loadConfig()
 void ThrustTestController::saveConfig()
 {
     prefs.begin("test", false);
-    prefs.putString("motorType", metadata.motorType);
-    prefs.putString("escType", metadata.escType);
-    prefs.putString("propellerType", metadata.propellerType);
+    prefs.putString("motorType", _config.metadata.motorType);
+    prefs.putString("escType", _config.metadata.escType);
+    prefs.putString("propellerType", _config.metadata.propellerType);
+
+    prefs.putString("csvFormat", _config.csvFormat.format);
 
     prefs.end();
 }

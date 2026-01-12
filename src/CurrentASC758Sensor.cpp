@@ -101,6 +101,32 @@ void CurrentACS758::setSensitivityFromVcc(float mVperAmp_at5V)
     _sensitivity = (mVperAmp_at5V / 1000.0f) * (_sensorVcc / 5.0f);
 }
 
+#include <cmath> // for isnan
+
+void CurrentACS758::calibrateSensitivityByCurrent(
+    float actualCurrent_A,
+    float measuredCurrent_A) // optional
+{
+    if (actualCurrent_A <= 0.0f)
+        return;
+
+    // auto-read if not provided
+    if (std::isnan(measuredCurrent_A))
+    {
+        measuredCurrent_A = getCurrent_A();
+    }
+
+    // avoid division by zero
+    if (actualCurrent_A == 0.0f)
+        return;
+
+    _sensitivity *= (measuredCurrent_A / actualCurrent_A);
+
+    ESP_LOGI(TAG,
+             "Calibrate: measured=%.3f A, actual=%.3f A, newSens=%.5f",
+             measuredCurrent_A, actualCurrent_A, _sensitivity);
+}
+
 float CurrentACS758::adcToVoltage(uint32_t raw)
 {
     if (_adcCalibrated)
@@ -153,12 +179,14 @@ void CurrentACS758::setIIR(float alpha)
     _iirAlpha = constrain(alpha, 0.0f, 1.0f);
 }
 
-void CurrentACS758::calibrateZero(uint16_t samples)
+bool CurrentACS758::tare(uint16_t samples)
 {
-    if (!isReady() || !_mutex)
-        return;
-
     ESP_LOGI(TAG, "ACS758 calibrating zero offset...");
+    if (!isReady() || !_mutex)
+    {
+        ESP_LOGE(TAG, "ACS758 sensor not ready!");
+        return false;
+    }
 
     xSemaphoreTake(_mutex, portMAX_DELAY);
 
@@ -172,7 +200,7 @@ void CurrentACS758::calibrateZero(uint16_t samples)
     float avgRaw = sum / (float)samples;
     _zeroOffset = adcToVoltage(avgRaw);
 
-    ESP_LOGI(TAG, "Zero calibrated: %.3f V", _zeroOffset);
-
     xSemaphoreGive(_mutex);
+    ESP_LOGI(TAG, "Zero calibrated: %.3f V", _zeroOffset);
+    return true;
 }

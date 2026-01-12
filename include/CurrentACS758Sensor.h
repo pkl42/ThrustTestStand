@@ -16,13 +16,25 @@
  * This class implements a task-safe, non-blocking driver for the ACS758
  * Hall-effect current sensor using the ESP32 ADC.
  *
+ * The sensor output is sampled periodically via update(), converted using
+ * ESP32 ADC calibration data (if available), and filtered using a combination
+ * of moving average and IIR filtering.
+ *
+ * Calibration responsibilities are intentionally split:
+ *  - This class handles low-level signal processing and current calculation
+ *  - Higher-level calibration workflows (e.g. persistence, UI interaction,
+ *    known-current calibration) should be handled by a facade (e.g. ThrustStand)
+ *
  * Features:
  *  - ESP32 ADC calibration compensation
  *  - Moving average + IIR filtering
  *  - Non-blocking update() sampling
  *  - Thread-safe access using FreeRTOS mutex
+ *  - Zero-current offset (tare) support
+ *  - Sensitivity-based current calibration
  *  - Designed for motor thrust / power measurement systems
  */
+
 class CurrentACS758 : public BaseSensor
 {
 public:
@@ -59,13 +71,22 @@ public:
     bool update() override;
 
     /**
-     * @brief Calibrate the zero-current offset
+     * @brief Tare the current sensor (set zero-current offset).
      *
-     * The sensor input must have zero current flowing during calibration.
+     * Measures the sensor output while no current is flowing and stores the
+     * resulting value as the zero-current offset. All subsequent current
+     * readings are compensated using this offset.
      *
-     * @param samples Number of ADC samples used for averaging
+     * The connected circuit **must have zero current** during this operation.
+     *
+     * @param[in] samples Number of ADC samples used for averaging the zero offset.
+     *                    Higher values improve accuracy but increase calibration time.
+     *
+     * @return true  If the zero offset was successfully determined and stored.
+     * @return false If taring failed (e.g. sensor not ready, ADC unavailable,
+     *               mutex not acquired).
      */
-    void calibrateZero(uint16_t samples = 500);
+    bool tare(uint16_t samples = 500);
 
     /**
      * @brief Manually set the sensor sensitivity
@@ -73,6 +94,33 @@ public:
      * @param voltsPerAmp Effective sensor sensitivity in volts per ampere
      */
     void setSensitivity(float voltsPerAmp);
+    /**
+     * @brief Calibrate sensor sensitivity using a known actual current
+     *
+     * Adjusts the internal sensor sensitivity based on a comparison between
+     * the known actual current (e.g. from a laboratory power supply) and the
+     * measured current reported by the sensor.
+     *
+     * The calibration is performed using the ratio:
+     * @code
+     * newSensitivity = oldSensitivity * (measuredCurrent / actualCurrent)
+     * @endcode
+     *
+     * If @p measuredCurrent_A is not provided (NaN), the function will internally
+     * acquire a current measurement using getCurrent_A(). This allows frontend-
+     * driven calibration workflows without exposing ADC voltages or offsets.
+     *
+     * @note The sensor must already be properly tared before calling this function.
+     * @note Calibration should be performed at a sufficiently high current
+     *       (recommended ≥10% of sensor range) to reduce noise influence.
+     *
+     * @param actualCurrent_A   Known actual current in amperes (must be > 0)
+     * @param measuredCurrent_A Optional measured current in amperes; if NaN,
+     *                          the value is automatically obtained from the sensor
+     */
+    void calibrateSensitivityByCurrent(
+        float actualCurrent_A,
+        float measuredCurrent_A = NAN);
 
     /**
      * @brief Get the Sensitivity object

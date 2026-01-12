@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <esp_log.h>
-#include "pinOut.h"
+#include "Config.h"
 #include <Preferences.h>
 #include <nvs_flash.h> // deleting nvs flash
 #include <cfloat>
@@ -10,24 +10,19 @@ const char *ThrustStand::TAG = "ThrustStand";
 
 static Preferences prefs;
 
-// calibration of load cells
-// 1. set calibration_value to 1 -> compile
-// 2. put a known weight on load cell (weight) and note the output (measure)
-// 3. calibration value is measuered(display)/weight
-
 test_data_t ThrustStand::_currentDataSet = {};
 test_data_accu_t ThrustStand::_cumDataSet = {};
 
 ThrustStand::ThrustStand()
-    : thrustSensor(HX711_DOUT_1_PIN, HX711_SCK_1_PIN),
-      torqueSensor(HX711_DOUT_2_PIN, HX711_SCK_2_PIN,
-                   HX711_DOUT_3_PIN, HX711_SCK_3_PIN),
-      rpmSensor(),
-      thermocoupleSensor(),
-      currentSensor(),
-      voltageSensor(),
-      hwEstop(ESTOP_PIN),
-      motor(MOTOR_ESC_PIN, 50, 13, 1)
+    : _thrustSensor(HX711_DOUT_1_PIN, HX711_SCK_1_PIN),
+      _torqueSensor(HX711_DOUT_2_PIN, HX711_SCK_2_PIN,
+                    HX711_DOUT_3_PIN, HX711_SCK_3_PIN),
+      _rpmSensor(),
+      _thermocoupleSensor(),
+      _currentSensor(),
+      _voltageSensor(),
+      _hwEstop(ESTOP_PIN),
+      _motor(MOTOR_ESC_PIN, 50, 13, 1)
 
 {
     // other members can be initialized here
@@ -44,12 +39,12 @@ bool ThrustStand::init()
         return false;
     }
 
-    if (!motor.begin())
+    if (!_motor.begin())
     {
 
         return false;
     };
-    motor.arm(); // Arm the ESC with a 2 second min throttle
+    _motor.arm(); // Arm the ESC with a 2 second min throttle
 
     return true;
 }
@@ -59,23 +54,23 @@ bool ThrustStand::init_sensors()
     bool initialize = true;
     ESP_LOGI(TAG, "Initializing Sensors ...");
 
-    if (THRUST_SENSOR_INSTALLED && (thrustSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
+    if (THRUST_SENSOR_INSTALLED && (_thrustSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
     {
-        if (!thrustSensor.begin()) // calibration value already set by loadConfig()
+        if (!_thrustSensor.begin()) // calibration value already set by loadConfig()
             initialize = false;
     }
 
     if (TORQUE_SENSOR_INSTALLED)
     {
-        if (torqueSensor.getState() != SensorState::SENSOR_READY)
+        if (_torqueSensor.getState() != SensorState::SENSOR_READY)
         {
-            if (!torqueSensor.begin()) // calibration value already set by loadConfig()
+            if (!_torqueSensor.begin()) // calibration value already set by loadConfig()
                 initialize = false;
         }
     }
 
     /*
-        if (CURRENT_SENSOR_INSTALLED)
+        if (CURRENT_SENSOR_INSTALLED && (_currentSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
         {
             Wire.begin();
             if (!powerSensor.begin())
@@ -89,38 +84,38 @@ bool ThrustStand::init_sensors()
             ESP_LOGI(TAG, "# INA226 Current Sensor initialized.");
         }
             */
-    if (CURRENT_SENSOR_INSTALLED && (currentSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
+    if (CURRENT_SENSOR_INSTALLED && (_currentSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
     {
-        if (!currentSensor.begin(CURRENT_SENSOR_PIN))
+        if (!_currentSensor.begin(CURRENT_SENSOR_PIN))
         {
             initialize = false;
         }
-        currentSensor.setMovingAverage(32);
-        currentSensor.setIIR(0.15f);
+        _currentSensor.setMovingAverage(32);
+        _currentSensor.setIIR(0.15f);
 
-        currentSensor.calibrateZero();
+        _currentSensor.tare();
     }
 
-    if (TEMPERATURE_SENSOR_INSTALLED && (thermocoupleSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
+    if (TEMPERATURE_SENSOR_INSTALLED && (_thermocoupleSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
     {
-        if (!thermocoupleSensor.begin(MAX31855_CS_PIN, -1, -1))
+        if (!_thermocoupleSensor.begin(MAX31855_CS_PIN, -1, -1))
         {
             initialize = false;
         }
     }
 
-    if (RPM_SENSOR_INSTALLED && (rpmSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
+    if (RPM_SENSOR_INSTALLED && (_rpmSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
     {
         RpmSensorConfig rpm_config;
-        if (!rpmSensor.begin(RPM_SENSOR_PIN, rpm_config))
+        if (!_rpmSensor.begin(RPM_SENSOR_PIN, rpm_config))
         {
             initialize = false;
         }
     }
 
-    if (VOLTAGE_SENSOR_INSTALLED && (voltageSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
+    if (VOLTAGE_SENSOR_INSTALLED && (_voltageSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
     {
-        if (!voltageSensor.begin(VOLTAGE_SENSOR_PIN))
+        if (!_voltageSensor.begin(VOLTAGE_SENSOR_PIN))
         {
             initialize = false;
         }
@@ -148,39 +143,39 @@ bool ThrustStand::updateSensors()
     bool ok = true;
 
     ok &= updateThrust();
-    _state.thrustSensor = thrustSensor.getState();
+    _state.thrustSensor = _thrustSensor.getState();
 
     ok &= updateTorque();
-    _state.torqueSensor = torqueSensor.getState();
+    _state.torqueSensor = _torqueSensor.getState();
 
     ok &= updateVoltage();
-    _state.voltageSensor = voltageSensor.getState();
+    _state.voltageSensor = _voltageSensor.getState();
 
     ok &= updateCurrent();
-    _state.currentSensor = currentSensor.getState();
+    _state.currentSensor = _currentSensor.getState();
 
     ok &= updateRPM();
-    _state.rpmSensor = rpmSensor.getState();
+    _state.rpmSensor = _rpmSensor.getState();
 
     ok &= updateTemperature();
-    _state.thermocoupleSensor = thermocoupleSensor.getState();
+    _state.thermocoupleSensor = _thermocoupleSensor.getState();
 
     return ok;
 }
 
-/**
- * @brief
- *
- */
-void ThrustStand::tareSensors()
+bool ThrustStand::tareSensors()
 {
-    thrustSensor.tare();
-    torqueSensor.tare();
+    bool success = true;
+
+    success &= _thrustSensor.tare();
+    success &= _torqueSensor.tare();
 
     if (CURRENT_SENSOR_INSTALLED)
     {
-        currentSensor.calibrateZero();
+        success &= _currentSensor.tare();
     }
+
+    return success;
 }
 
 void ThrustStand::resetCumulativeData()
@@ -196,18 +191,18 @@ bool ThrustStand::update()
 {
     bool ok = true;
 
-    if (hwEstop.isTriggered())
+    if (_hwEstop.isTriggered())
     {
-        motor.emergencyStop("Hardware E-STOP pressed");
+        _motor.emergencyStop("Hardware E-STOP pressed");
         setControlMode(ThrottleControlMode::MANUAL);
         // other actuators here
 
         ok = false;
     }
     // Run the motor control loop to handle acceleration/deceleration
-    ok &= motor.update();
-    _state.motor = motor.getState();
-    _state.motorMountState = motor.getMountState();
+    ok &= _motor.update();
+    _state.motor = _motor.getState();
+    _state.motorMountState = _motor.getMountState();
 
     ok &= updateSensors();
 
@@ -224,7 +219,7 @@ void ThrustStand::setControlMode(ThrottleControlMode mode)
 float ThrustStand::setThrottle(float throttle, ThrottleSource source)
 {
 
-    return (setThrottle(throttle, true, 3000 * abs((motor.getCurrentThrottle() - throttle)) / 100.0f, source)); // Smooth acceleration based on throttle change
+    return (setThrottle(throttle, true, 3000 * abs((_motor.getCurrentThrottle() - throttle)) / 100.0f, source)); // Smooth acceleration based on throttle change
 }
 
 float ThrustStand::setThrottle(float throttle,
@@ -239,7 +234,7 @@ float ThrustStand::setThrottle(float throttle,
         return _currentDataSet.throttle; // or last commanded value
     }
 
-    _currentDataSet.throttle = motor.setThrottle(throttle, smooth, accelTimeMs); // Smooth acceleration based on throttle change
+    _currentDataSet.throttle = _motor.setThrottle(throttle, smooth, accelTimeMs); // Smooth acceleration based on throttle change
     return (_currentDataSet.throttle);
 }
 
@@ -291,6 +286,10 @@ test_data_t ThrustStand::getAverage() const
     else
         avg.current = _currentDataSet.current;
 
+    // derived values
+    avg.power = avg.current * avg.voltage;
+    avg.thrust_ratio = avg.thrust / avg.power;
+
     /* ---------- RPM ---------- */
 
     if (_cumDataSet.samples.rpm > 0)
@@ -325,46 +324,61 @@ void ThrustStand::log_current_data_set()
 
 float ThrustStand::getThrustCalFactor()
 {
-    return thrustSensor.getCalibration();
+    return _thrustSensor.getCalibration();
 }
 
 void ThrustStand::setThrustCalFactor(float factor)
 {
-    thrustSensor.setCalibration(factor);
+    _thrustSensor.setCalibration(factor);
     saveConfig();
 }
 
 void ThrustStand::setMaxThrottlePercent(float maxPercent)
 {
-    motor.setMaxThrottlePercent(maxPercent);
+    _motor.setMaxThrottlePercent(maxPercent);
     saveConfig();
 }
 
 void ThrustStand::setTorqueCalibration(float cal1, float cal2, float distance)
 {
-    torqueSensor.setCalibration(cal1, cal2, distance);
+    _torqueSensor.setCalibration(cal1, cal2, distance);
     saveConfig();
 }
 
 TorqueSensor::Calibration ThrustStand::getTorqueCalibration()
 {
-    return (torqueSensor.getCalibration());
+    return (_torqueSensor.getCalibration());
 }
 
 void ThrustStand::setCurrentSensitivity(float voltsPerAmp)
 {
-    currentSensor.setSensitivity(voltsPerAmp);
+    _currentSensor.setSensitivity(voltsPerAmp);
     saveConfig();
 }
 
 bool ThrustStand::setPulseRangeUs(uint16_t minPulseUs, uint16_t maxPulseUs)
 {
-    bool updateFlag = motor.setPulseRangeUs(minPulseUs, maxPulseUs);
+    bool updateFlag = _motor.setPulseRangeUs(minPulseUs, maxPulseUs);
     if (updateFlag)
         saveConfig();
 
     return updateFlag;
 }
+
+bool ThrustStand::setVoltageCalibrationFactor(float calibrationFactor)
+{
+    bool updateFlag = _voltageSensor.setCalibrationFactor(calibrationFactor);
+    if (updateFlag)
+        saveConfig();
+
+    return updateFlag;
+}
+
+void ThrustStand::autoCalibrateCurrentSensor(float actualCurrent_A, float measuredCurrent_A)
+{
+    _currentSensor.calibrateSensitivityByCurrent(actualCurrent_A, measuredCurrent_A);
+    saveConfig();
+};
 
 void ThrustStand::loadConfig()
 {
@@ -374,13 +388,13 @@ void ThrustStand::loadConfig()
     {
         if (!prefs.isKey("thrust_cal"))
             prefs.putFloat("thrust_cal", 1.0f);
-        thrustSensor.setCalibration(prefs.getFloat("thrust_cal", 1.0f));
+        _thrustSensor.setCalibration(prefs.getFloat("thrust_cal", 1.0f));
     }
 
     if (!prefs.isKey("thrust_max"))
         prefs.putFloat("thrust_max", 100.f);
     float thrust_max = prefs.getFloat("thrust_max", 100.f);
-    motor.setMaxThrottlePercent(thrust_max);
+    _motor.setMaxThrottlePercent(thrust_max);
 
     /* ---------- Torque ---------- */
     if (TORQUE_SENSOR_INSTALLED)
@@ -396,7 +410,7 @@ void ThrustStand::loadConfig()
         float cal2 = prefs.getFloat("torque_cal2", 1.f);
         float dist = prefs.getFloat("torque_dist", 1.f);
 
-        torqueSensor.setCalibration(cal1, cal2, dist);
+        _torqueSensor.setCalibration(cal1, cal2, dist);
     }
     /* ---------- Current ---------- */
     if (CURRENT_SENSOR_INSTALLED)
@@ -404,16 +418,24 @@ void ThrustStand::loadConfig()
         if (!prefs.isKey("current_sens"))
             prefs.putFloat("current_sens", 0.0264f);
         float current_sensitivity = prefs.getFloat("current_sens", 0.0264f);
-        currentSensor.setSensitivity(current_sensitivity);
+        _currentSensor.setSensitivity(current_sensitivity);
     }
     /* ---------- Voltage ---------- */
-    if (!prefs.isKey("rTop"))
-        prefs.putFloat("rTop", 10e3f);
-    float rTop = prefs.getFloat("rTop", 10e3f);
-    if (!prefs.isKey("rButtom"))
-        prefs.putFloat("rButtom", 1e3f);
-    float rButtom = prefs.getFloat("rButtom", 1e3f);
-    voltageSensor.setResistorvalues(rTop, rButtom);
+    if (VOLTAGE_SENSOR_INSTALLED)
+    {
+        if (!prefs.isKey("rTop"))
+            prefs.putFloat("rTop", 10e3f);
+        float rTop = prefs.getFloat("rTop", 10e3f);
+        if (!prefs.isKey("rButtom"))
+            prefs.putFloat("rButtom", 1e3f);
+        float rButtom = prefs.getFloat("rButtom", 1e3f);
+        _voltageSensor.setResistorvalues(rTop, rButtom);
+
+        if (!prefs.isKey("volt_calib"))
+            prefs.putFloat("volt_calib", 1.f);
+        float volt_calib = prefs.getFloat("volt_calib", 1.);
+        _voltageSensor.setCalibrationFactor(volt_calib);
+    }
 
     /* ----------Motor ---------- */
     if (!prefs.isKey("minPulseUs"))
@@ -432,14 +454,14 @@ void ThrustStand::saveConfig()
     prefs.begin("thrust", false);
     if (THRUST_SENSOR_INSTALLED)
     {
-        prefs.putFloat("thrust_cal", thrustSensor.getCalibration());
+        prefs.putFloat("thrust_cal", _thrustSensor.getCalibration());
     }
 
     prefs.putFloat("thrust_max", getMaxThrottlePercent());
     /* ---------- Torque ---------- */
     if (TORQUE_SENSOR_INSTALLED)
     {
-        auto torqueCal = torqueSensor.getCalibration();
+        auto torqueCal = _torqueSensor.getCalibration();
 
         prefs.putFloat("torque_cal1", torqueCal.cal1);
         prefs.putFloat("torque_cal2", torqueCal.cal2);
@@ -448,18 +470,19 @@ void ThrustStand::saveConfig()
     /* ---------- Current ---------- */
     if (CURRENT_SENSOR_INSTALLED)
     {
-        prefs.putFloat("current_sens", currentSensor.getSensitivity());
+        prefs.putFloat("current_sens", _currentSensor.getSensitivity());
     }
     /* ---------- Voltage ---------- */
     if (VOLTAGE_SENSOR_INSTALLED)
     {
-        prefs.putFloat("rTop", voltageSensor.getTopResistor());
-        prefs.putFloat("rBottom", voltageSensor.getBottomResistor());
+        prefs.putFloat("rTop", _voltageSensor.getTopResistor());
+        prefs.putFloat("rBottom", _voltageSensor.getBottomResistor());
+        prefs.putFloat("volt_calib", _voltageSensor.getCalibrationFactor());
     }
 
     /* ----------Motor ---------- */
-    prefs.putUInt("minPulseUs", motor.getMinPulseUs());
-    prefs.putUInt("maxPulseUs", motor.getMaxPulseUs());
+    prefs.putUInt("minPulseUs", _motor.getMinPulseUs());
+    prefs.putUInt("maxPulseUs", _motor.getMaxPulseUs());
 
     prefs.end();
 }
@@ -472,10 +495,10 @@ void ThrustStand::resetNVS()
 
 bool ThrustStand::updateThrust()
 {
-    if (!thrustSensor.update())
+    if (!_thrustSensor.update())
         return false;
 
-    _currentDataSet.thrust = thrustSensor.getThrust();
+    _currentDataSet.thrust = _thrustSensor.getThrust();
 
     if (_accumulate_stats)
     {
@@ -488,21 +511,25 @@ bool ThrustStand::updateThrust()
 
 bool ThrustStand::updateCurrent()
 {
-    if (!currentSensor.update())
+    if (!_currentSensor.update())
         return false;
 
-    _currentDataSet.current = currentSensor.getCurrent_A();
+    _currentDataSet.current = _currentSensor.getCurrent_A();
+    // these calculation only work, when current and thrust is updated before
     _currentDataSet.power =
         _currentDataSet.voltage * _currentDataSet.current;
 
+    _currentDataSet.thrust_ratio =
+        (_currentDataSet.power != 0.0f)
+            ? (_currentDataSet.thrust / _currentDataSet.power)
+            : 0.0f;
+
     if (_accumulate_stats)
     {
-
         _cumDataSet.values.current += _currentDataSet.current;
-        _cumDataSet.values.power += _currentDataSet.power;
+        // _currentDataSet.power does not need to be cumulated, as calculated in getAverage()
 
         _cumDataSet.samples.current++;
-        _cumDataSet.samples.power++;
     }
 
     return true;
@@ -510,10 +537,10 @@ bool ThrustStand::updateCurrent()
 
 bool ThrustStand::updateTemperature()
 {
-    if (!thermocoupleSensor.update())
+    if (!_thermocoupleSensor.update())
         return false;
 
-    float temp = thermocoupleSensor.getTemperatureInCelsius();
+    float temp = _thermocoupleSensor.getTemperatureInCelsius();
     _currentDataSet.temperature = temp;
 
     if (_accumulate_stats)
@@ -530,10 +557,10 @@ bool ThrustStand::updateTemperature()
 
 bool ThrustStand::updateRPM()
 {
-    if (!rpmSensor.update())
+    if (!_rpmSensor.update())
         return false;
 
-    _currentDataSet.rpm = rpmSensor.getRPM();
+    _currentDataSet.rpm = _rpmSensor.getRPM();
 
     if (_accumulate_stats)
     {
@@ -546,10 +573,10 @@ bool ThrustStand::updateRPM()
 
 bool ThrustStand::updateVoltage()
 {
-    if (!voltageSensor.update())
+    if (!_voltageSensor.update())
         return false;
 
-    _currentDataSet.voltage = voltageSensor.getVoltage_V();
+    _currentDataSet.voltage = _voltageSensor.getVoltage_V();
 
     if (_accumulate_stats)
     {
@@ -562,12 +589,12 @@ bool ThrustStand::updateVoltage()
 
 bool ThrustStand::updateTorque()
 {
-    if (!torqueSensor.update())
+    if (!_torqueSensor.update())
         return false;
 
-    _currentDataSet.torque = torqueSensor.getTorqueNcm();
-    _currentDataSet.torque_cell_1 = torqueSensor.getLoad1();
-    _currentDataSet.torque_cell_2 = torqueSensor.getLoad2();
+    _currentDataSet.torque = _torqueSensor.getTorqueNcm();
+    _currentDataSet.torque_cell_1 = _torqueSensor.getLoad1();
+    _currentDataSet.torque_cell_2 = _torqueSensor.getLoad2();
 
     if (_accumulate_stats)
     {
@@ -595,7 +622,7 @@ void ThrustStand::updateStatusLed()
 StatusLed::State ThrustStand::deriveLedState() const
 {
     // 1 Hard errors first (highest priority)
-    if (hwEstop.isTriggered())
+    if (_hwEstop.isTriggered())
         return StatusLed::State::ERROR;
 
     if (_state.controlMode == ThrottleControlMode::AUTOMATIC)
@@ -606,13 +633,13 @@ StatusLed::State ThrustStand::deriveLedState() const
 
     if (_webHealth == SubsystemHealth::ERROR)
         return StatusLed::State::WARNING; // yellow blinking
-
-    if (state.controlMode == ThrottleControlMode::AUTOMATIC)
+    */
+    if (_state.controlMode == ThrottleControlMode::AUTOMATIC)
         return StatusLed::State::RUNNING;
 
-    if (!isReady())
+    if (!_motor.isReady())
         return StatusLed::State::BUSY;
-    */
+
     // 4 Normal idle
     return StatusLed::State::READY;
 }

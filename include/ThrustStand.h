@@ -1,7 +1,7 @@
 #ifndef THRUST_STAND_H
 #define THRUST_STAND_H
 
-#include "pinOut.h"
+#include "Config.h"
 #include "MotorESC.h"
 #include "RPMSensor.h"
 #include "ThrustSensor.h"
@@ -33,6 +33,7 @@ typedef struct
     float voltage;         ///< Bus voltage [V]
     float current;         ///< Measured current [A]
     float power;           ///< Calculated electrical power [W]
+    float thrust_ratio;    ///< Calculated thrust /electrical power [W]
     float rpm;             ///< Motor speed in RPM
     float temperature;     ///< Measured temperature [°C]
     float temperature_max; ///< Maximum recorded temperature [°C]
@@ -51,7 +52,6 @@ typedef struct
     uint32_t torque_cell_2; ///< Number of torque cell 2 samples
     uint32_t voltage;       ///< Number of voltage samples
     uint32_t current;       ///< Number of current samples
-    uint32_t power;         ///< Number of power samples
     uint32_t rpm;           ///< Number of RPM samples
     uint32_t temperature;   ///< Number of temperature samples
 } test_data_samples_t;
@@ -109,16 +109,27 @@ struct ThrustStandState
 
 /**
  * @class ThrustStand
- * @brief High-level interface for controlling and monitoring a thrust stand.
+ * @brief High-level façade for controlling and monitoring a thrust stand.
  *
- * Responsibilities:
- *  - Initialize and update all sensors
- *  - Control motor ESC and throttle
- *  - Acquire, log, and accumulate test data
- *  - Provide machine-level state snapshots
+ * The ThrustStand class acts as the central coordination layer of the system.
+ * It aggregates sensors, actuators, and calibration data into a single,
+ * machine-level interface.
  *
- * Contains no UI or presentation logic.
+ * Key responsibilities:
+ *  - Initialize and update all sensors and actuators
+ *  - Control the motor ESC and throttle behavior
+ *  - Acquire, accumulate, and provide measurement data
+ *  - Manage calibration parameters and persist them in non-volatile storage
+ *  - Expose a stable API for UI, logging, and test automation
+ *
+ * Design notes:
+ *  - Sensor classes are intentionally kept lightweight and stateless
+ *    with respect to persistence.
+ *  - This class acts as a façade, centralizing configuration, calibration
+ *    workflows, and NVS storage.
+ *  - Contains no UI, networking, or presentation logic.
  */
+
 class ThrustStand
 {
 public:
@@ -144,9 +155,16 @@ public:
     bool init_sensors();
 
     /**
-     * @brief Tare all applicable sensors to zero.
+     * @brief Tare all installed sensors of the thrust stand.
+     *
+     * Calls the tare() function of all available sensors (thrust, torque,
+     * and optional current sensor). The operation is considered successful
+     * only if all individual taring operations succeed.
+     *
+     * @return true  If all sensors were successfully tared.
+     * @return false If one or more sensors failed to tare.
      */
-    void tareSensors();
+    bool tareSensors();
 
     /**
      * @brief Update all sensors and internal state.
@@ -182,11 +200,14 @@ public:
                       ThrottleSource source = ThrottleSource::MANUAL);
 
     /**
-     * @brief Get currently applied throttle.
+     * @brief Get current sensor sensitivity.
      *
-     * @return Current throttle percentage
+     * Returns the effective sensitivity of the current sensor in volts per ampere
+     * at the current sensor supply voltage.
+     *
+     * @return Sensor sensitivity in V/A
      */
-    float getCurrentThrottle() const { return motor.getCurrentThrottle(); }
+    float getCurrentSensitivity() const { return _currentSensor.getSensitivity(); }
 
     /**
      * @brief Set the throttle control mode.
@@ -198,7 +219,7 @@ public:
     /**
      * @brief Get maximum allowed throttle percentage.
      */
-    float getMaxThrottlePercent() const { return motor.getMaxThrottlePercent(); }
+    float getMaxThrottlePercent() const { return _motor.getMaxThrottlePercent(); }
 
     /**
      * @brief Set maximum allowed throttle percentage.
@@ -208,7 +229,7 @@ public:
     /**
      * @brief Get current motor ESC state.
      */
-    MotorESC::EscState getMotorState() const { return motor.getMountState(); }
+    MotorESC::EscState getMotorState() const { return _motor.getMountState(); }
 
     /**
      * @brief Configure the ESC pulse range.
@@ -217,13 +238,13 @@ public:
      */
     bool setPulseRangeUs(uint16_t minPulseUs, uint16_t maxPulseUs);
 
-    uint16_t getMinPulseUs() const { return motor.getMinPulseUs(); }
-    uint16_t getMaxPulseUs() const { return motor.getMaxPulseUs(); }
+    uint16_t getMinPulseUs() const { return _motor.getMinPulseUs(); }
+    uint16_t getMaxPulseUs() const { return _motor.getMaxPulseUs(); }
 
     /**
      * @brief Check if the motor has reached the target RPM.
      */
-    bool isMotorAtTargetSpeed() const { return motor.isAtTargetSpeed(); }
+    bool isMotorAtTargetSpeed() const { return _motor.isAtTargetSpeed(); }
 
     /**
      * @brief Get thrust sensor calibration factor.
@@ -250,14 +271,73 @@ public:
     TorqueSensor::Calibration getTorqueCalibration();
 
     /**
-     * @brief Get current sensor sensitivity (volts per amp).
-     */
-    float getCurrentSensitivity() const { return currentSensor.getSensitivity(); }
-
-    /**
-     * @brief Set current sensor sensitivity (volts per amp).
+     * @brief Set current sensor sensitivity.
+     *
+     * Updates the sensitivity used by the current sensor for converting measured
+     * voltage into amperes.
+     *
+     * The value is:
+     *  - Forwarded to the underlying CurrentACS758 sensor
+     *  - Persistently stored in non-volatile storage (NVS)
+     *
+     * This method provides a centralized configuration interface and should be
+     * preferred over directly accessing the sensor.
+     *
+     * @param voltsPerAmp Sensor sensitivity in volts per ampere
      */
     void setCurrentSensitivity(float voltsPerAmp);
+    /**
+     * @brief Automatically calibrate the current sensor using a known actual current.
+     *
+     * Performs a sensitivity calibration of the current sensor by comparing the
+     * measured current against a known actual current value (e.g. from a laboratory
+     * power supply).
+     *
+     * The calibration uses the ratio:
+     * @code
+     * newSensitivity = oldSensitivity * (measuredCurrent / actualCurrent)
+     * @endcode
+     *
+     * If @p measuredCurrent_A is not provided (NaN), the current measurement is
+     * automatically acquired from the sensor. This enables frontend-driven
+     * calibration workflows without exposing ADC voltages or sensor internals.
+     *
+     * The resulting sensitivity is:
+     *  - Applied to the underlying CurrentACS758 sensor
+     *  - Persistently stored in non-volatile storage (NVS)
+     *
+     * @note The current sensor must be properly tared before calibration.
+     * @note Calibration should be performed at a sufficiently high current
+     *       to reduce noise influence.
+     *
+     * @param actualCurrent_A   Known actual current in amperes (must be > 0)
+     * @param measuredCurrent_A Optional measured current in amperes; if NaN,
+     *                          the value is automatically obtained
+     */
+    void autoCalibrateCurrentSensor(float actualCurrent_A,
+                                    float measuredCurrent_A = NAN);
+
+    /**
+     * @brief Set the bus voltage calibration factor
+     *
+     * This method updates the empirical gain calibration used for
+     * bus voltage measurement. The calibration factor compensates
+     * ADC gain error and resistor tolerance.
+     *
+     * The value is:
+     *  - Persistently stored in NVS
+     *  - Forwarded to the underlying BusVoltageADC sensor
+     *
+     * This method acts as a façade, providing centralized configuration
+     * management while keeping sensor implementations lightweight.
+     *
+     * Typical values are close to 1.0.
+     *
+     * @param calibrationFactor Gain correction factor
+     */
+    bool setVoltageCalibrationFactor(float calibrationFactor);
+
+    float getVoltageCalibrationFactor() const { return (_voltageSensor.getCalibrationFactor()); };
 
     /**
      * @brief Log the current live data set to console or storage.
@@ -322,15 +402,15 @@ private:
 
     bool _accumulate_stats = false; ///< Enable statistics accumulation
 
-    ThrustSensor thrustSensor; ///< Thrust sensor instance
-    TorqueSensor torqueSensor; ///< Torque sensor instance
-    RpmSensor rpmSensor;       ///< RPM sensor instance
-    MotorESC motor;            ///< Motor ESC controller
+    ThrustSensor _thrustSensor; ///< Thrust sensor instance
+    TorqueSensor _torqueSensor; ///< Torque sensor instance
+    RpmSensor _rpmSensor;       ///< RPM sensor instance
+    MotorESC _motor;            ///< Motor ESC controller
 
-    BusVoltageADC voltageSensor;           ///< Voltage sensor instance
-    CurrentACS758 currentSensor;           ///< Current sensor instance
-    ThermocoupleSensor thermocoupleSensor; ///< Thermocouple sensor instance
-    HardwareEstop hwEstop;                 ///< Emergency stop hardware
+    BusVoltageADC _voltageSensor;           ///< Voltage sensor instance
+    CurrentACS758 _currentSensor;           ///< Current sensor instance
+    ThermocoupleSensor _thermocoupleSensor; ///< Thermocouple sensor instance
+    HardwareEstop _hwEstop;                 ///< Emergency stop hardware
 
     StatusLed::State deriveLedState() const;
     void updateStatusLed();

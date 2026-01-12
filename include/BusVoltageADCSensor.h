@@ -1,26 +1,30 @@
 #ifndef BUS_VOLTAGE_ADC_SENSOR_H
 #define BUS_VOLTAGE_ADC_SENSOR_H
-
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <driver/adc.h>
 #include <esp_adc_cal.h>
-
 #include "BaseSensor.h"
 
 /**
  * @class BusVoltageADC
  * @brief Non-blocking, calibrated ADC-based bus voltage sensor (ESP32)
  *
- * This class implements a task-safe, non-blocking voltage measurement
- * using an ESP32 ADC input and a resistor divider.
+ * This class implements a task-safe, non-blocking bus voltage measurement
+ * using an ESP32 ADC input and an external resistor voltage divider.
+ *
+ * Measurement pipeline:
+ *   raw ADC → ESP32 ADC calibration → voltage divider scaling → gain calibration
+ *
+ * The resulting value represents the physical bus voltage in volts.
  *
  * Features:
- *  - ESP32 ADC calibration compensation
+ *  - ESP32 ADC calibration compensation (eFuse / Vref)
+ *  - Hardware voltage divider scaling
+ *  - Empirical gain calibration to compensate ADC and resistor tolerances
  *  - Non-blocking update() sampling
  *  - Thread-safe access using FreeRTOS mutex
- *  - Designed for dynamic bus voltage measurement under load
  *
  * Typical use cases:
  *  - Battery voltage monitoring
@@ -32,6 +36,9 @@ class BusVoltageADC : public BaseSensor
 public:
     /**
      * @brief Construct a new BusVoltageADC sensor instance
+     *
+     * Initializes internal state. Hardware configuration is performed
+     * by calling begin().
      */
     BusVoltageADC();
 
@@ -43,45 +50,79 @@ public:
     /**
      * @brief Initialize the bus voltage ADC sensor
      *
-     * Configures the ESP32 ADC, voltage divider scaling,
-     * and calibration characteristics.
+     * Configures the ESP32 ADC channel, initializes calibration
+     * characteristics (if available), and prepares internal resources.
      *
-     * @param adcPin   Arduino ADC pin connected to the voltage divider
+     * @param adcPin Arduino ADC pin connected to the voltage divider output
      * @return true if initialization succeeded
      */
     bool begin(uint8_t adcPin);
 
     /**
-     * @brief set top and bottom resistor values
+     * @brief Set voltage divider resistor values
+     *
+     * Updates the hardware voltage divider configuration and
+     * recalculates the divider ratio:
+     *
+     *   dividerRatio = (Rtop + Rbottom) / Rbottom
      *
      * @param rTop     Top resistor value of the voltage divider (Ohms)
      * @param rBottom  Bottom resistor value of the voltage divider (Ohms)
      */
-
     void setResistorvalues(float rTop, float rBottom);
 
-    float getTopResistor() const { return _rTop;};
-    float getBottomResistor() const { return _rBottom;};
-    
+    /**
+     * @brief Get the configured top resistor value
+     * @return Top resistor value in Ohms
+     */
+    float getTopResistor() const { return _rTop; };
+
+    /**
+     * @brief Get the configured bottom resistor value
+     * @return Bottom resistor value in Ohms
+     */
+    float getBottomResistor() const { return _rBottom; };
+
+    /**
+     * @brief Set the empirical voltage calibration factor
+     *
+     * This factor compensates ADC gain error and resistor tolerance
+     * and is applied after ADC calibration and divider scaling.
+     *
+     * Typical values are close to 1.0.
+     *
+     * @param calibrationFactor Gain correction factor
+     */
+    bool setCalibrationFactor(float calibrationFactor);
+
+    /**
+     * @brief Get the current calibration factor
+     * @return Calibration gain factor
+     */
+    float getCalibrationFactor() const { return _calibrationFactor; };
 
     /**
      * @brief Perform a non-blocking ADC sample and update the bus voltage
      *
      * This method should be called periodically from a task or main loop.
-     * It performs ADC sampling, calibration compensation,
-     * and voltage divider scaling.
+     * It performs:
+     *  - Raw ADC sampling
+     *  - ESP32 ADC calibration compensation
+     *  - Voltage divider scaling
+     *  - Empirical gain calibration
      *
-     * @return true  If a new sample was successfully acquired and the internal
-     *               voltage value was updated with valid data.
-     * @return false If the sample could not be completed or was invalid
-     *               (e.g. ADC not ready, conversion error, out-of-range reading).
+     * The resulting calibrated bus voltage is stored internally.
+     *
+     * @return true  If a new sample was successfully acquired and stored
+     * @return false If sampling failed or the sensor is not ready
      */
     bool update() override;
 
     /**
      * @brief Get the latest measured bus voltage
      *
-     * Thread-safe and non-blocking.
+     * Thread-safe accessor returning the most recent calibrated
+     * bus voltage value.
      *
      * @return Bus voltage in volts
      */
@@ -89,22 +130,36 @@ public:
 
 private:
     /**
-     * @brief Convert raw ADC reading to scaled bus voltage
+     * @brief Convert raw ADC reading to bus voltage (pre-calibration)
      *
      * Applies ESP32 ADC calibration (if available) and
-     * resistor divider scaling.
+     * hardware voltage divider scaling.
+     *
+     * The empirical calibration factor is NOT applied here.
      *
      * @param raw Raw ADC reading
-     * @return Scaled bus voltage in volts
+     * @return Bus voltage in volts before gain calibration
      */
     float adcToVoltage(uint32_t raw);
 
     /**
-     * @brief Voltage divider scaling factor
+     * @brief Hardware voltage divider ratio
      *
-     * scale = (Rtop + Rbottom) / Rbottom
+     * Dimensionless ratio derived from resistor values:
+     *
+     *   dividerRatio = (Rtop + Rbottom) / Rbottom
+     *
+     * Used to scale the ADC pin voltage to the actual bus voltage.
      */
-    float _scale = 1.0f;
+    float _dividerRatio = 1.1f;
+
+    /**
+     * @brief Empirical voltage calibration factor
+     *
+     * Gain correction applied after ADC calibration and divider scaling.
+     * Compensates ADC gain error and resistor tolerance.
+     */
+    float _calibrationFactor = 1.0f;
 
     /**
      * @brief ADC pin connected to the voltage divider output
@@ -127,7 +182,7 @@ private:
     float _rBottom = 1e3f;
 
     /**
-     * @brief Latest measured bus voltage
+     * @brief Latest measured and calibrated bus voltage
      */
     float _voltage = 0.0f;
 

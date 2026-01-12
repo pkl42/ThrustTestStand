@@ -195,15 +195,19 @@ Image files are stored in the `media/` directory using a consistent naming schem
 Each automated test step records:
 
 - Throttle percentage
-- Thrust (N)
-- Torque (Nm)
+- Thrust (g)
+- Torque (Ncm)
 - Voltage (V)
 - Current (A)
 - Electrical power (W)
+- Efficency (g/W)
 - RPM
 - Temperature (°C)
 
-Data is buffered in memory during the test and written to LittleFS as a CSV file upon completion.
+Data is buffered in memory during the test and written to LittleFS as a CSV file upon completion.  
+The Test scales from 0% to 100% thrust (which is proportional to the ESC PWM Range from Minumum Pulse (µs) to Maximum Pulse (µs) setting)  
+in 5% steps.  
+When using e.g. a laboratory power supply which is limited to a certain current rating you can set the Max Throttle percentage.
 
 ---
 
@@ -248,52 +252,143 @@ This system controls high-power rotating machinery.
 
 ## Hardware Notes
 
-Very helpful additions you find on <https://github.com/iforce2d/thrustTester/tree/master>
+Very helpful additions can be found at:
+<https://github.com/iforce2d/thrustTester/tree/master>
 
 ### Motor speed controller
 
-The ESC should be using regular PWM and the default calibration range is 1000μs for zero throttle and 2000μs for full throttle.  
-The software allows you to modify them in range from 800μs to 2200μs.
-To get the right settings for your ESC just unmount the propeller, then move the trottle on the WEBUI towards 100%.  
-You should reach the maximum rpm-speed of the motor (kv-value * voltage) at 100%, otherwise increase or decrease the Max Puls (μs) in the Calibration Section of the
-calibration section on the WEB UI.
+The ESC should use standard PWM. The default calibration range is 1000 µs for zero throttle and 2000 µs for full throttle.  
+The software allows modifying this range from 800 µs to 2200 µs.
+
+To find the correct settings for your ESC, unmount the propeller and move the throttle in the WEB UI to 100%.  
+You should reach the maximum motor speed (kv-value × voltage) at 100%.  
+If not, increase or decrease the *Max Pulse (µs)* value in the Calibration section of the WEB UI.
 
 ### Load cell amplifier
 
-The HX711 can run at either 10Hz or 80Hz update rate. Obviously we want the faster rate, but most HX711 module boards come configured as 10Hz. To change it to 80Hz you will need to disconnect the RATE pin 15 from the pad it is soldered to, and connect it to VCC (easiest way is to use pin 16 which is right next to it).
+The HX711 can operate at either 10 Hz or 80 Hz update rate. Obviously, the faster rate is preferred, but most HX711 module boards are configured for 10 Hz by default.
 
-Please see details on <https://github.com/iforce2d/thrustTester/tree/master>
+To change the update rate to 80 Hz, disconnect the RATE pin (pin 15) from the PCB pad it is soldered to and connect it to VCC.  
+The easiest way is to solder it to pin 16, which is located directly next to it.
+
+**Important:** Make sure pin 15 is completely disconnected from the PCB pad. Otherwise, you risk a short circuit when connecting it to VCC.
+
+Please see further details at:
+<https://github.com/iforce2d/thrustTester/tree/master>
+
+![HX711 Refresh Rate](media/hx711_change_refresh_rate.jpg)
+
+The load cells have an arrow indicating the direction of the applied force.  
+This arrow should point in the direction where the force is acting, although the load cell will work in both directions.
+
+#### Calibration procedure
+
+1. In the Calibration section, set the *Thrust Cal-Factor* to **1**.
+2. In the Live section, press the **“Tare Sensors”** button.
+3. Place a defined weight at the center point of the propeller mount.
+4. The calibration factor is calculated as:
+
+   **Cal-Factor = Thrust value (Live view) / defined weight**
+
+For calibration, a deflection holder was built to apply the defined weight:
+
+![deflection holder](media/thrust_sensor_calibration.jpg)
+
+The water bottle is suspended using a nylon cord and fixed at the center point with a screw or pin, as shown in the picture of the RPM sensor.
+
+Another method is to rotate the thrust stand so the defined weight can be hung directly from the center point.
+
+During calibration, the measured thrust value may drift (slowly decreasing) the longer the weight is applied.  
+This behavior is typical for low-cost load cells. To reduce this effect, load cells with an accuracy class such as **C3** or **C4** should be used.
+
+#### Torque sensor calibration
+
+For calibrating the torque sensor, unmount the motor plate (or loosen the hinge screws) so that both load cells do not influence each other.  
+This is also the reason why hinges are used for each torque load cell.
+
+To simplify calibration, the torque sensor reports the **absolute torque value**, without information about the direction of rotation.
+
+### Units & Calibration Philosophy
+
+Although thrust is physically a force and its SI unit is **Newton (N)**, this project intentionally uses **grams (g)** as its primary internal unit.  
+More precisely, all load-cell-based measurements are expressed in **gram-force (gf)**.
+
+This choice is based on the calibration chain:
+
+- Load cells measure force
+- Calibration is performed using a known weight
+- The reference weight is determined using a scale that displays grams
+- The calibration therefore maps HX711 raw values directly to gram-force
+
+As a result, the internal unit `g` represents **gram-force (gf)**, i.e. the force exerted by a mass of 1 g under Earth gravity.
+
+This approach:
+
+- Matches motor and propeller datasheets, which commonly specify thrust in grams
+- Keeps calibration simple and intuitive
+- Avoids embedding the gravitational constant into the calibration factor
+- Ensures consistency across all load-cell-based measurements
+
+**Torque measurement:**  
+Motor torque is measured using two load cells and a known lever arm distance. Internally, torque is represented in **g·m (gram-force meters)**, which is fully consistent with the thrust unit.
+
+For applications requiring SI units, conversion is straightforward:
+
+- 1 g (gf) ≈ 0.00980665 N  
+- 1 g·m ≈ 0.00980665 Nm
 
 ### Voltage Sensor
 
-The Voltage Sensor is quite simple. As the battery minus needs to be connected to GND of ESP32 i just "injected" a pin into the cable.
+The voltage sensor uses a resistor divider of 10 kΩ / 1 kΩ.  
+This limits the maximum measurable battery voltage to **36.3 V**, as the ESP32 ADC input must not exceed 3.3 V.
 
-  ![Voltage Divider](media/VoltageSensorSchematic.png)
+![Voltage Divider](media/VoltageSensorSchematic.png)
+
+Since the battery negative terminal must be connected to the ESP32 GND, a pin was directly inserted into the cable.
+
+![Voltage Minus Connection](media/voltage_sensor_connection.jpg)
+
+For calibration, a laboratory power supply was used and set to a known voltage (e.g. 22 V).  
+Adjust the *Voltage Calibration* value in the Calibration section until the displayed live voltage matches the PSU value.
+
+Because the ADC is highly linear, the calibration factor is limited to a range between **0.9 and 1.1**.
 
 ### Current Sensor ACS758
 
-I used a 2.5mm² cable for passing through the battery power. On my test with consuming 33A the cable did not get warm.
-As the ESC Flycolor 45A in my tests uses an AWG 16 (which is 1.31mm²) this is good enough. The connector from Battery and
-to ESC are XT60 plugs.
+The 50 A version of the ACS758 sensor was used, together with a 2.5 mm² cable for the battery current path.  
+Even ESCs rated at 45 A (e.g. Flycolor 45A) typically use AWG16 (1.31 mm²), so this setup is sufficiently robust.
+
+In tests with currents up to 33 A, the cable did not heat up.  
+XT60 connectors are used between the battery/PSU, current sensor, and ESC.
+
+Calibration options:
+
+1. Manually set the **Current Sensitivity** value (volts per amp), or  
+2. Run the motor using a PSU at a known current (e.g. 8 A shown on the PSU) and enter this value into **“Actual Current (A)”**, then press **Set**.
 
 ### RPM Sensor TCRT5000 IR Infrared
 
-I unsoldered the core infrared sensor to place it near the rotor of the motor. Even you can adjust the sensitivity of the sensor with a potentiometer it  
-turned out to be difficult to get a proper signal as of all the reflections of the rotor. I used duct tape for reflextion and colored the rest of the rotor with black  
-whiteboard marker (non-permanent). This works as long as the sunlight is not too bright. May be a lasor sensor would be a better choice.
+The IR sensor core was desoldered and repositioned close to the motor rotor.  
+Although the sensor sensitivity can be adjusted using a potentiometer, it is difficult to obtain a clean signal due to rotor reflections.
+
+A strip of duct tape was used as a reflective marker, while the rest of the rotor was colored black using a non-permanent whiteboard marker.  
+The tape covers approximately half the rotor circumference.
+
+This setup works as long as ambient sunlight is not too strong. A laser-based sensor may be a better alternative.
+
+Tests using propeller reflections were also performed, but at higher RPM the reflection time was too short for reliable detection.
 
 ---
 
 ## 3D Print Parts Notes
 
-The mounting plate for the ESP32 and Hardware is here: cad/ESP32SensorAdapter.step
-The housing for the infrared sensor and pcb is here:  
-cad/InfraredSensorHousing.step
-cad/ElectronicHousingCover.step
-cad/ElectronicHousing.step
-For mounting M3 heat inserts are used.
+- ESP32 mounting plate: `cad/ESP32SensorAdapter.step`
+- Infrared sensor housing: `cad/InfraredSensorHousing.step`
+- Electronics housing:
+  - `cad/ElectronicHousing.step`
+  - `cad/ElectronicHousingCover.step`
 
----
+M3 heat-set inserts are used for mounting.
 
 ## License
 

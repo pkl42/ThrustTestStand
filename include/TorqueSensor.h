@@ -146,8 +146,12 @@ public:
      * Useful to remove offset or preload from measurements.
      *
      * @note Should be called when no load is applied for best accuracy.
+     * 
+     * @return true  If the zero offset was successfully determined and stored.
+     * @return false If taring failed (e.g. sensor not ready, ADC unavailable,
+     *               mutex not acquired). * 
      */
-    void tare();
+    bool tare();
 
 private:
     const char *TAG = "TorqueSensor"; ///< Logging tag

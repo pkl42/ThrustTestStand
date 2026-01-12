@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include "StatusLed.h"
-#include "pinOut.h"
+#include "Config.h"
 
 /* =========================================================
    REAL IMPLEMENTATION (board has onboard RGB LED)
@@ -84,7 +84,7 @@ void StatusLed::update()
    ========================================================= */
 
 void StatusLed::begin() {}
-void StatusLed::set(State) {}
+void StatusLed::setState(State) {}
 void StatusLed::update() {}
 
 #endif

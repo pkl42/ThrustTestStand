@@ -69,11 +69,12 @@ bool ThrustSensor::update()
     return true;
 }
 
-void ThrustSensor::tare()
+bool ThrustSensor::tare()
 {
     if (!isReady())
-        return;
+        return false;
     ESP_LOGI("ThrustSensor", "Taring sensor ...");
     _loadCell.tareNoDelay();
     ESP_LOGI("ThrustSensor", "done");
+    return true;
 }

@@ -2,7 +2,10 @@
 #define THRUST_TEST_CONTROLLER_H
 
 #include <stdint.h>
-#include "ThrustStand.h"
+#include <LittleFS.h>
+// #include "ThrustStand.h"
+
+class ThrustStand;
 
 /**
  * @brief Status of an ongoing thrust test.
@@ -27,6 +30,17 @@ typedef struct
     String escType;       ///< ESC identifier or description
     String propellerType; ///< Propeller identifier or description
 } TestMetadata_t;
+
+typedef struct
+{
+    char format[3] = ".,";
+} CsvFormat_t;
+
+typedef struct
+{
+    TestMetadata_t metadata;
+    CsvFormat_t csvFormat;
+} TestConfiguration_t;
 
 /**
  * @class ThrustTestController
@@ -127,7 +141,10 @@ public:
      *
      * @return Reference to current TestMetadata_t structure
      */
-    const TestMetadata_t &getMetadata() const { return metadata; }
+    const TestMetadata_t &getMetadata() const { return _config.metadata; }
+
+    bool setCsvFormat(const char *format, bool saveConfigFlag = true);
+    const CsvFormat_t &getCsvFormat() const { return _config.csvFormat; };
 
     /**
      * @brief Export recorded test data to LittleFS in CSV format.
@@ -136,7 +153,7 @@ public:
      * @param numberOfRecords Number of steps/records to write
      * @return true if CSV was successfully written
      */
-    bool write_csv_to_littlefs(const char *path, uint32_t numberOfRecords);
+    bool write_csv_to_littlefs(const char *path, uint32_t numberOfRecords, const char *csvFormat = ".,");
 
 private:
     static const char *TAG; ///< Logging tag
@@ -153,12 +170,14 @@ private:
     bool _accumulating = false; ///< Flag for ongoing data accumulation
 
     TestStatus_t _status = {false, 0, 0, 0.0f}; ///< Current test status
-    TestMetadata_t metadata{};                  ///< Current test metadata
+    TestConfiguration_t _config{};              ///< Current test metadata
 
     /**
      * @brief Update the progress percentage based on current step.
      */
     void updateProgress();
+
+    static void printFloat(File &f, float value, int precision, char decimalSep);
 
     /**
      * @brief Load configuration from non-volatile storage.

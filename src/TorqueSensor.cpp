@@ -160,12 +160,14 @@ bool TorqueSensor::update()
     return false;
 }
 
-void TorqueSensor::tare()
+bool TorqueSensor::tare()
 {
     if (!isReady())
-        return;
+        return false;
+
     ESP_LOGI("TorqueSensor", "Taring sensor ...");
     _lc1.tareNoDelay();
     _lc2.tareNoDelay();
     ESP_LOGI("TorqueSensor", "done");
+    return true;
 }

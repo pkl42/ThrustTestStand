@@ -2,6 +2,13 @@
 #define PINOUT_H
 #include <IPAddress.h>
 
+#define THRUSTSTAND_APP_NAME "Motor Thrust Test Stand"
+#define THRUSTSTAND_APP_VERSION "v1.4.0"
+#define THRUSTSTAND_CSV_VERSION "1.1"
+
+// #define THRUSTSTAND_GIT_HASH        "a9c4e2f"
+#define THRUSTSTAND_BUILD_DATE __DATE__ " " __TIME__
+
 /*
 ESP32 S3 Pins
 https://www.wemos.cc/en/latest/s3/s3.html

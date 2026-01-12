@@ -73,8 +73,12 @@ public:
      *
      * Adjusts the sensor offset so that the current load reads as zero.
      * Useful to eliminate bias or pre-load effects.
+     * 
+     * @return true  If the zero offset was successfully determined and stored.
+     * @return false If taring failed (e.g. sensor not ready, ADC unavailable,
+     *               mutex not acquired). * 
      */
-    void tare();
+    bool tare();
 
 private:
     const char *TAG = "ThrustSensor"; ///< Logging tag for ESP log messages

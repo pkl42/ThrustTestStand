@@ -358,7 +358,7 @@ progress::-webkit-progress-value {
 
 				<div class="field">
 					<label>Thrust:</label>
-					<span id="thrust">0</span> g
+					<span id="thrust">0</span> gf
 				</div>
 
 				<div class="field">
@@ -368,12 +368,12 @@ progress::-webkit-progress-value {
 
 				<div class="field">
 					<label>Torque Cell 1:</label>
-					<span id="torqueCell1">0</span> g
+					<span id="torqueCell1">0</span> gf
 				</div>
 
 				<div class="field">
 					<label>Torque Cell 2:</label>
-					<span id="torqueCell2">0</span> g
+					<span id="torqueCell2">0</span> gf
 				</div>
 				
 				<div class="field">
@@ -399,6 +399,10 @@ progress::-webkit-progress-value {
 					<span id="power">0</span> W
 				</div>
 
+				<div class="field">
+					<label>Thrust Ratio:</label>
+					<span id="thrust_ratio">0</span> g/W
+				</div>
 
 				<div class="field">
 					<label>Temperature:</label>
@@ -465,6 +469,15 @@ progress::-webkit-progress-value {
 					<label for="prop_type">Propeller Type:</label>
 					<input type="text" id="prop_type" placeholder="e.g. 5x4.3x3">
 				</div>
+				
+				<div class="field">
+					<label for="csv_format">CSV Format:</label>
+					<select id="csv_format">
+						<option value=".,">Standard (.,) – US / ISO</option>
+						<option value=",;">Excel DE (,;) – German</option>
+						<option value=".;">Semicolon (.;) – dot decimal</option>
+					</select>
+				</div>
 
 				<div class="field button-group">
 					<button onclick="startTest()">Start Test</button>
@@ -505,8 +518,8 @@ progress::-webkit-progress-value {
 	</section>
 
 
-	<section id="setup">
-		<h2>Setup / Calibration</h2>
+	<section id="calibration">
+		<h2>Calibration</h2>
 
 		<div class="two-col">
 			<!-- LEFT -->
@@ -553,11 +566,33 @@ progress::-webkit-progress-value {
 			</div>
 
 			
-			<div class="setup-row-3">
-				<hr>
+
+
+			</div>
+			<!-- RIGHT column -->
+			<div>
+				<div class="setup-row-3">
+
 				<label for="currentSensitivity">Current Sensitivity (voltsPerAmp):</label>
 				<input type="number" id="currentSensitivity" step="0.001">
 				<button onclick="setCurrentSensitivity()">Set</button>
+
+			</div>
+			
+			<div class="setup-row-3">
+				<label for="actualCurrent">Actual Current (A):</label>
+				<input type="number" id="actualCurrent" step="0.01" placeholder="Enter known current from PSU">
+				<button onclick="calibrateCurrentSensor()">Set</button>
+				
+				<hr>
+			</div>
+			
+			<div>
+				<div class="setup-row-3">
+
+				<label for="voltageCalibration">Voltage Calibration:</label>
+				<input type="number" id="voltageCalibration" step="0.01">
+				<button onclick="setVoltageCalibration()">Set</button>
 				<hr>
 			</div>
 		
@@ -580,10 +615,8 @@ progress::-webkit-progress-value {
 				</div>
 				
 			</div>
-
+			
 			</div>
-			<!-- RIGHT (empty / future use) -->
-			<div></div>
 		</div>
 	</section>
 
@@ -655,6 +688,13 @@ progress::-webkit-progress-value {
                     cfg.current_sensitivity.toFixed(4);
             }
 			
+			/* ---------- Voltage ---------- */
+            if (cfg.voltage_calibration !== undefined) {
+                document.getElementById('voltageCalibration').value =
+                    cfg.voltage_calibration.toFixed(4);
+            }			
+			voltageCalibration
+			
 			/* ---------- Motor/ESC ---------- */			
             if (cfg.minPulseUs !== undefined) {
                 document.getElementById('minPulseUs').value =
@@ -695,7 +735,7 @@ progress::-webkit-progress-value {
 			alert("Max Throttle saved: " + val + "%");
 		})
 		.catch(err => {
-			alert("Fehler beim Speichern");
+			alert("Error during save!");
 			console.error(err);
 		});
 	}
@@ -719,11 +759,56 @@ progress::-webkit-progress-value {
 			alert("Current Sensitivity stored: " + val + "%");
 		})
 		.catch(err => {
-			alert("Fehler beim Speichern");
+			alert("Error during save!");
 			console.error(err);
 		});
+	}
+
+	function calibrateCurrentSensor() {
+		const actualCurrent = parseFloat(document.getElementById('actualCurrent').value);
+		if (isNaN(actualCurrent) || actualCurrent <= 0) {
+			alert("Please enter a valid positive current value.");
+			return;
+		}
+
+		fetch('/calibrate_current', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+			body: `actual_current=${actualCurrent}`
+		})
+		.then(res => res.json())
+		.then(data => {
+			document.getElementById('currentSensitivity').value =
+				data.currentSensitivity.toFixed(5);
+		})
+		.catch(err => alert("Error: " + err));
 	}	
 	
+	
+	function setVoltageCalibration() {
+		const val = parseFloat(document.getElementById('voltageCalibration').value) || 1;
+
+
+		const params = new URLSearchParams();
+		params.append('voltage_calibration', val);
+
+		fetch('/config', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded'
+			},
+			body: params.toString()
+		})
+		.then(r => {
+			if (!r.ok) throw new Error("Save failed");
+			alert("Current Voltage Calibration stored: " + val + "%");
+		})
+		.catch(err => {
+			alert("Error during save!");
+			console.error(err);
+		});
+	}
+
 	
 
 	function tare(event) {
@@ -837,6 +922,7 @@ progress::-webkit-progress-value {
                 document.getElementById('voltage').innerText = data.voltage.toFixed(2);
                 document.getElementById('current').innerText = data.current.toFixed(2);
                 document.getElementById('power').innerText = data.power.toFixed(2);
+				document.getElementById('thrust_ratio').innerText = data.thrust_ratio.toFixed(2);
                 document.getElementById('rpm').innerText = data.rpm.toFixed(0);
                 document.getElementById('temperature').innerText = data.temperature.toFixed(2);
                 document.getElementById('temperature_max').innerText = data.temperature_max.toFixed(2);
@@ -985,11 +1071,13 @@ progress::-webkit-progress-value {
 		const motorType = document.getElementById("motor_type").value;
 		const escType = document.getElementById("esc_type").value;
 		const propType  = document.getElementById("prop_type").value;
+		const csvFormat = document.getElementById("csv_format").value;
 
 		const params = new URLSearchParams();
 		params.append("motorType", motorType);
 		params.append("escType", escType);
 		params.append("propellerType", propType);
+		params.append("csvFormat", csvFormat);
 
 		fetch("/api/test/metadata", {
 			method: "POST",
@@ -1025,6 +1113,9 @@ progress::-webkit-progress-value {
 			}	
 			if (cfg.propellerType) {
 				document.getElementById("prop_type").value=cfg.propellerType;
+			}
+			if (cfg.csvFormat) {
+				document.getElementById("csv_format").value = cfg.csvFormat || ".,";
 			}
 		})			
 		.catch(err => {
