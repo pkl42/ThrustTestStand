@@ -163,18 +163,6 @@ public:
     bool isAtTargetSpeed(float tolerancePercent = 2.0f) const;
 
     /**
-     * @brief Set maximum allowed throttle.
-     *
-     * @param maxPercent Maximum throttle in percent [0–100].
-     */
-    void setMaxThrottlePercent(float maxPercent);
-
-    /**
-     * @brief Get the configured maximum throttle limit.
-     */
-    float getMaxThrottlePercent() const { return (_maxThrottlePercent); };
-
-    /**
      * @brief Get current applied throttle.
      */
     float getCurrentThrottle() const
@@ -214,7 +202,6 @@ private:
     // ---------- Runtime state ----------
     EscState _state = EscState::DISARMED; ///< Current ESC state
 
-    float _maxThrottlePercent = 100.0f;
     float _currentThrottle = 0.0f;
     float _targetThrottle = 0.0f;
     float _startThrottle = 0.0f;

@@ -123,11 +123,11 @@ public:
     bool setMetadata(const String &motor, const String &esc, const String &prop);
 
     /**
-     * @brief Array of recorded data points for the test.
+     * @brief Array of recorded data points for the test (0-100%/20=5% steps on thrust testing)
      *
-     * Indexed by step number (0–100).
+     * Indexed by step number (0–20).
      */
-    test_data_t test_data[101] = {};
+    test_data_accu_t test_data[21] = {};
 
     /**
      * @brief Get the current test status.
@@ -143,6 +143,8 @@ public:
      */
     const TestMetadata_t &getMetadata() const { return _config.metadata; }
 
+    void writeCsvMetadata(File &f);
+
     bool setCsvFormat(const char *format, bool saveConfigFlag = true);
     const CsvFormat_t &getCsvFormat() const { return _config.csvFormat; };
 
@@ -153,7 +155,11 @@ public:
      * @param numberOfRecords Number of steps/records to write
      * @return true if CSV was successfully written
      */
-    bool write_csv_to_littlefs(const char *path, uint32_t numberOfRecords, const char *csvFormat = ".,");
+    bool exportMeanCsv(const char *path, uint32_t numberOfRecords, const char *csvFormat = ".,");
+
+    bool exportStatisticsCsv(const char *path,
+                             uint32_t numberOfRecords,
+                             const char *csvFormat = ".,");
 
 private:
     static const char *TAG; ///< Logging tag
@@ -178,6 +184,12 @@ private:
     void updateProgress();
 
     static void printFloat(File &f, float value, int precision, char decimalSep);
+
+    static void printStats(File &f,
+                           const sensor_stats_t &s,
+                           uint8_t decimals,
+                           char decimalSep,
+                           char fieldSep);
 
     /**
      * @brief Load configuration from non-volatile storage.

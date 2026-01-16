@@ -11,7 +11,7 @@ const char *ThrustStand::TAG = "ThrustStand";
 static Preferences prefs;
 
 test_data_t ThrustStand::_currentDataSet = {};
-test_data_accu_t ThrustStand::_cumDataSet = {};
+test_data_accu_t ThrustStand::_accuDataSet = {};
 
 ThrustStand::ThrustStand()
     : _thrustSensor(HX711_DOUT_1_PIN, HX711_SCK_1_PIN),
@@ -33,6 +33,8 @@ bool ThrustStand::init()
 
     loadConfig();
 
+    pinMode(CAGE_SWITCH_PIN, INPUT);
+
     if (!init_sensors())
     {
 
@@ -44,7 +46,18 @@ bool ThrustStand::init()
 
         return false;
     };
-    _motor.arm(); // Arm the ESC with a 2 second min throttle
+    _hwEstop.attachActuator(&_motor);
+    _hwEstop.begin(); // attach interrupts, ready to stop motor
+
+    // --- Fail-safe: check E-Stop before arming ---
+    if (isSafeToArm())
+    {
+        _motor.arm(); // Arm the ESC
+    }
+    else
+    {
+        ESP_LOGW(TAG, "Hardware E-Stop/Cage open active: motor NOT armed");
+    }
 
     return true;
 }
@@ -128,7 +141,7 @@ bool ThrustStand::init_sensors()
 void ThrustStand::startAccumulation()
 {
     ESP_LOGI(TAG, "startAccumulation...");
-    resetCumulativeData();
+    resetAccumulativeData();
     ESP_LOGI(TAG, "startAccumulation done");
     _accumulate_stats = true;
 }
@@ -178,19 +191,16 @@ bool ThrustStand::tareSensors()
     return success;
 }
 
-void ThrustStand::resetCumulativeData()
+void ThrustStand::resetAccumulativeData()
 {
-    ESP_LOGI(TAG, "resetCumulativeData");
-    _cumDataSet = {};
-
-    // Explicit baseline for max tracking
-    _cumDataSet.values.temperature_max = -0.f;
+    ESP_LOGI(TAG, "resetAccumulativeData");
+    _accuDataSet = {};
 }
 
 bool ThrustStand::update()
 {
     bool ok = true;
-
+    // 1. Hardware E-STOP (highest priority)
     if (_hwEstop.isTriggered())
     {
         _motor.emergencyStop("Hardware E-STOP pressed");
@@ -199,13 +209,20 @@ bool ThrustStand::update()
 
         ok = false;
     }
-    // Run the motor control loop to handle acceleration/deceleration
+    // 2. Run the motor control loop to handle acceleration/deceleration
     ok &= _motor.update();
     _state.motor = _motor.getState();
     _state.motorMountState = _motor.getMountState();
-
+    // 3. Sensor update
     ok &= updateSensors();
 
+    // 4. Software safety supervision (after sensors!)
+
+    if (!checkSafetyLimits())
+    {
+        ok = false;
+    }
+    // 5. Status indication
     _statusLed.update();
 
     return ok;
@@ -234,82 +251,13 @@ float ThrustStand::setThrottle(float throttle,
         return _currentDataSet.throttle; // or last commanded value
     }
 
+    throttle = constrain(throttle, 0.f, _safety.limits.maxThrottlePercent);
     _currentDataSet.throttle = _motor.setThrottle(throttle, smooth, accelTimeMs); // Smooth acceleration based on throttle change
+    if (_accumulate_stats)
+        _accuDataSet.throttle = _currentDataSet.throttle;
     return (_currentDataSet.throttle);
 }
 
-/**
- * @brief returns the average values of the collected sensor data
- *
- * @return test_data_t
- */
-test_data_t ThrustStand::getAverage() const
-{
-    test_data_t avg = {}; // zero-initialize
-
-    // Throttle is not averaged – always take current value
-    avg.throttle = _currentDataSet.throttle;
-
-    /* ---------- Load cell / thrust related ---------- */
-
-    if (_cumDataSet.samples.thrust > 0)
-        avg.thrust = _cumDataSet.values.thrust / _cumDataSet.samples.thrust;
-    else
-        avg.thrust = _currentDataSet.thrust;
-
-    if (_cumDataSet.samples.torque > 0)
-        avg.torque = _cumDataSet.values.torque / _cumDataSet.samples.torque;
-    else
-        avg.torque = _currentDataSet.torque;
-
-    if (_cumDataSet.samples.torque_cell_1 > 0)
-        avg.torque_cell_1 =
-            _cumDataSet.values.torque_cell_1 / _cumDataSet.samples.torque_cell_1;
-    else
-        avg.torque_cell_1 = _currentDataSet.torque_cell_1;
-
-    if (_cumDataSet.samples.torque_cell_2 > 0)
-        avg.torque_cell_2 =
-            _cumDataSet.values.torque_cell_2 / _cumDataSet.samples.torque_cell_2;
-    else
-        avg.torque_cell_2 = _currentDataSet.torque_cell_2;
-
-    /* ---------- Electrical ---------- */
-
-    if (_cumDataSet.samples.voltage > 0)
-        avg.voltage = _cumDataSet.values.voltage / _cumDataSet.samples.voltage;
-    else
-        avg.voltage = _currentDataSet.voltage;
-
-    if (_cumDataSet.samples.current > 0)
-        avg.current = _cumDataSet.values.current / _cumDataSet.samples.current;
-    else
-        avg.current = _currentDataSet.current;
-
-    // derived values
-    avg.power = avg.current * avg.voltage;
-    avg.thrust_ratio = avg.thrust / avg.power;
-
-    /* ---------- RPM ---------- */
-
-    if (_cumDataSet.samples.rpm > 0)
-        avg.rpm = _cumDataSet.values.rpm / _cumDataSet.samples.rpm;
-    else
-        avg.rpm = _currentDataSet.rpm;
-
-    /* ---------- Temperature ---------- */
-
-    if (_cumDataSet.samples.temperature > 0)
-        avg.temperature =
-            _cumDataSet.values.temperature / _cumDataSet.samples.temperature;
-    else
-        avg.temperature = _currentDataSet.temperature;
-
-    // Max temperature is never averaged – it's a running max
-    avg.temperature_max = _cumDataSet.values.temperature_max;
-
-    return avg;
-}
 
 void ThrustStand::log_current_data_set()
 {
@@ -317,8 +265,8 @@ void ThrustStand::log_current_data_set()
     ESP_LOGI("log", "Throttle: %.1f%%  Thrust: %.3f  Torque: %.3f T-Load1: %.3f T-Load2: %.3f",
              _currentDataSet.throttle, _currentDataSet.thrust,
              _currentDataSet.torque, torque_cal.cal1, torque_cal.cal2);
-    ESP_LOGI(TAG, " rpm: %.0f voltage: %.3f  current: %.3f   temp_max: %.1f",
-             _currentDataSet.rpm, _currentDataSet.voltage, _currentDataSet.current, _currentDataSet.temperature_max);
+    ESP_LOGI(TAG, " rpm: %.0f voltage: %.3f  current: %.3f ",
+             _currentDataSet.rpm, _currentDataSet.voltage, _currentDataSet.current);
     ;
 }
 
@@ -330,12 +278,6 @@ float ThrustStand::getThrustCalFactor()
 void ThrustStand::setThrustCalFactor(float factor)
 {
     _thrustSensor.setCalibration(factor);
-    saveConfig();
-}
-
-void ThrustStand::setMaxThrottlePercent(float maxPercent)
-{
-    _motor.setMaxThrottlePercent(maxPercent);
     saveConfig();
 }
 
@@ -354,6 +296,40 @@ void ThrustStand::setCurrentSensitivity(float voltsPerAmp)
 {
     _currentSensor.setSensitivity(voltsPerAmp);
     saveConfig();
+}
+
+void ThrustStand::setThrottleLimitPercent(float percent)
+{
+
+    _safety.limits.maxThrottlePercent = constrain(percent, 0.0f, 100.0f);
+    saveConfig();
+}
+
+void ThrustStand::setCurrentLimitA(float maxCurrentA)
+{
+    if (_safety.limits.maxCurrentA > 0)
+    {
+        _safety.limits.maxCurrentA = maxCurrentA;
+        saveConfig();
+    }
+}
+
+void ThrustStand::setVoltageLimitV(float maxVoltageV)
+{
+    if (_safety.limits.maxVoltageV <= 30.)
+    {
+        _safety.limits.maxVoltageV = maxVoltageV;
+        saveConfig();
+    }
+}
+
+void ThrustStand::setThrustLimitGF(float maxThrustGF)
+{
+    if (_safety.limits.maxThrustGF <= 4000.)
+    {
+        _safety.limits.maxThrustGF = maxThrustGF;
+        saveConfig();
+    }
 }
 
 bool ThrustStand::setPulseRangeUs(uint16_t minPulseUs, uint16_t maxPulseUs)
@@ -380,6 +356,112 @@ void ThrustStand::autoCalibrateCurrentSensor(float actualCurrent_A, float measur
     saveConfig();
 };
 
+bool ThrustStand::checkSafetyLimits()
+{
+    // Already tripped → keep enforcing safe state
+    if (_safety.state.tripped)
+        return false;
+
+    if (_hwEstop.isTriggered())
+    {
+        triggerSafetyTrip(SafetyTripReason::SAFETY_TRIP_EXTERNAL_INTERLOCK, 0.f);
+        return false;
+    }
+
+    if (isCageOpen())
+    { // NC switch open → 0V
+
+        triggerSafetyTrip(SafetyTripReason::SAFETY_TRIP_EXTERNAL_INTERLOCK, 0.f);
+        return false;
+    }
+
+    // Over-current
+    if (_safety.limits.maxCurrentA > 0.0f &&
+        _currentDataSet.current > _safety.limits.maxCurrentA)
+    {
+        triggerSafetyTrip(SafetyTripReason::SAFETY_TRIP_OVER_CURRENT, _currentDataSet.current);
+        return false;
+    }
+
+    // Over-voltage
+    if (_safety.limits.maxVoltageV > 0.0f &&
+        _currentDataSet.voltage > _safety.limits.maxVoltageV)
+    {
+        triggerSafetyTrip(SafetyTripReason::SAFETY_TRIP_OVER_VOLTAGE, _currentDataSet.voltage);
+        return false;
+    }
+
+    // Over-thrust
+    if (_safety.limits.maxThrustGF > 0.0f &&
+        _currentDataSet.thrust > _safety.limits.maxThrustGF)
+    {
+        triggerSafetyTrip(SafetyTripReason::SAFETY_TRIP_OVER_THRUST, _currentDataSet.thrust);
+        return false;
+    }
+
+    return true;
+}
+
+void ThrustStand::triggerSafetyTrip(SafetyTripReason r, float value)
+{
+    if (!_safety.state.tripped)
+    {
+        _safety.state.tripped = true;
+        _safety.state.reason = r;
+        _safety.state.tripValue = value;
+    }
+
+    _motor.emergencyStop("Safety limit violated");
+    setControlMode(ThrottleControlMode::MANUAL);
+}
+
+void ThrustStand::clearSafetyTrip()
+{
+    _safety.state.tripped = false;
+    _safety.state.reason = SafetyTripReason::SAFETY_TRIP_NONE;
+    _safety.state.tripValue = 0.0f;
+    _motor.resetEmergencyStop();
+}
+
+bool ThrustStand::isSafeToArm() const
+{
+    return !_hwEstop.isTriggered() && !isCageOpen();
+}
+
+bool ThrustStand::isCageOpen() const
+{
+    return digitalRead(CAGE_SWITCH_PIN) == LOW; // LOW = open/unsafe
+}
+
+const char *ThrustStand::safetyTripReasonToString(SafetyTripReason r)
+{
+    switch (r)
+    {
+    case SafetyTripReason::SAFETY_TRIP_NONE:
+        return "NONE";
+    case SafetyTripReason::SAFETY_TRIP_OVER_CURRENT:
+        return "OVER_CURRENT";
+    case SafetyTripReason::SAFETY_TRIP_OVER_VOLTAGE:
+        return "OVER_VOLTAGE";
+    case SafetyTripReason::SAFETY_TRIP_OVER_THRUST:
+        return "OVER_THRUST";
+    case SafetyTripReason::SAFETY_TRIP_OVER_TEMPERATURE:
+        return "OVER_TEMPERATURE";
+    case SafetyTripReason::SAFETY_TRIP_SENSOR_FAILURE:
+        return "SENSOR_FAILURE";
+    case SafetyTripReason::SAFETY_TRIP_ACTUATOR_FAILURE:
+        return "ACTUATOR_FAILURE";
+    case SafetyTripReason::SAFETY_TRIP_CONTROL_FAULT:
+        return "CONTROL_FAULT";
+    case SafetyTripReason::SAFETY_TRIP_USER_ABORT:
+        return "USER_ABORT";
+    case SafetyTripReason::SAFETY_TRIP_EXTERNAL_INTERLOCK:
+        return "EXTERNAL_INTERLOCK";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 void ThrustStand::loadConfig()
 {
     float interimValue;
@@ -390,11 +472,6 @@ void ThrustStand::loadConfig()
             prefs.putFloat("thrust_cal", 1.0f);
         _thrustSensor.setCalibration(prefs.getFloat("thrust_cal", 1.0f));
     }
-
-    if (!prefs.isKey("thrust_max"))
-        prefs.putFloat("thrust_max", 100.f);
-    float thrust_max = prefs.getFloat("thrust_max", 100.f);
-    _motor.setMaxThrottlePercent(thrust_max);
 
     /* ---------- Torque ---------- */
     if (TORQUE_SENSOR_INSTALLED)
@@ -445,6 +522,23 @@ void ThrustStand::loadConfig()
     uint16_t minPulseUs = prefs.getUInt("minPulseUs");
     uint16_t maxPulseUs = prefs.getUInt("maxPulseUs");
 
+    /* ---------- Safety ---------- */
+    if (!prefs.isKey("maxCurrentA"))
+        prefs.putFloat("maxCurrentA", 40.f);
+    _safety.limits.maxCurrentA = prefs.getFloat("maxCurrentA");
+
+    if (!prefs.isKey("maxThrustGF"))
+        prefs.putFloat("maxThrustGF", 4000.f);
+    _safety.limits.maxCurrentA = prefs.getFloat("maxThrustGF");
+
+    if (!prefs.isKey("maxThrottle"))
+        prefs.putFloat("maxThrottle", 100.f);
+    _safety.limits.maxThrottlePercent = prefs.getFloat("maxThrottle");
+
+    if (!prefs.isKey("maxVoltageV"))
+        prefs.putFloat("maxVoltageV", 30.f);
+    _safety.limits.maxVoltageV = prefs.getFloat("maxVoltageV");
+
     prefs.end();
 }
 
@@ -457,7 +551,6 @@ void ThrustStand::saveConfig()
         prefs.putFloat("thrust_cal", _thrustSensor.getCalibration());
     }
 
-    prefs.putFloat("thrust_max", getMaxThrottlePercent());
     /* ---------- Torque ---------- */
     if (TORQUE_SENSOR_INSTALLED)
     {
@@ -484,6 +577,12 @@ void ThrustStand::saveConfig()
     prefs.putUInt("minPulseUs", _motor.getMinPulseUs());
     prefs.putUInt("maxPulseUs", _motor.getMaxPulseUs());
 
+    /* ---------Security Limits ---------- */
+    prefs.putFloat("maxCurrentA", _safety.limits.maxCurrentA);
+    prefs.putFloat("maxThrustGF", _safety.limits.maxThrustGF);
+    prefs.putFloat("maxThrottle", _safety.limits.maxThrottlePercent);
+    prefs.putFloat("maxVoltageV", _safety.limits.maxVoltageV);
+
     prefs.end();
 }
 
@@ -491,6 +590,31 @@ void ThrustStand::resetNVS()
 {
     nvs_flash_erase();
     nvs_flash_init();
+}
+
+static inline void updateStats(sensor_stats_t &s, float x)
+{
+    if (s.n == 0)
+    {
+        s.mean = x;
+        s.M2 = 0.0f;
+        s.min = x;
+        s.max = x;
+        s.n = 1;
+        return;
+    }
+
+    s.n++;
+
+    float delta = x - s.mean;
+    s.mean += delta / s.n;
+    float delta2 = x - s.mean;
+    s.M2 += delta * delta2;
+
+    if (x < s.min)
+        s.min = x;
+    if (x > s.max)
+        s.max = x;
 }
 
 bool ThrustStand::updateThrust()
@@ -502,8 +626,7 @@ bool ThrustStand::updateThrust()
 
     if (_accumulate_stats)
     {
-        _cumDataSet.values.thrust += _currentDataSet.thrust;
-        _cumDataSet.samples.thrust++;
+        updateStats(_accuDataSet.thrust, _currentDataSet.thrust);
     }
 
     return true;
@@ -515,21 +638,10 @@ bool ThrustStand::updateCurrent()
         return false;
 
     _currentDataSet.current = _currentSensor.getCurrent_A();
-    // these calculation only work, when current and thrust is updated before
-    _currentDataSet.power =
-        _currentDataSet.voltage * _currentDataSet.current;
-
-    _currentDataSet.thrust_ratio =
-        (_currentDataSet.power != 0.0f)
-            ? (_currentDataSet.thrust / _currentDataSet.power)
-            : 0.0f;
 
     if (_accumulate_stats)
     {
-        _cumDataSet.values.current += _currentDataSet.current;
-        // _currentDataSet.power does not need to be cumulated, as calculated in getAverage()
-
-        _cumDataSet.samples.current++;
+        updateStats(_accuDataSet.current, _currentDataSet.current);
     }
 
     return true;
@@ -545,11 +657,7 @@ bool ThrustStand::updateTemperature()
 
     if (_accumulate_stats)
     {
-        _cumDataSet.values.temperature += temp;
-        _cumDataSet.samples.temperature++;
-
-        if (temp > _cumDataSet.values.temperature_max)
-            _cumDataSet.values.temperature_max = temp;
+        updateStats(_accuDataSet.temperature, temp);
     }
 
     return true;
@@ -564,8 +672,7 @@ bool ThrustStand::updateRPM()
 
     if (_accumulate_stats)
     {
-        _cumDataSet.values.rpm += _currentDataSet.rpm;
-        _cumDataSet.samples.rpm++;
+        updateStats(_accuDataSet.rpm, _currentDataSet.rpm);
     }
 
     return true;
@@ -580,8 +687,7 @@ bool ThrustStand::updateVoltage()
 
     if (_accumulate_stats)
     {
-        _cumDataSet.values.voltage += _currentDataSet.voltage;
-        _cumDataSet.samples.voltage++;
+        updateStats(_accuDataSet.voltage, _currentDataSet.voltage);
     }
 
     return true;
@@ -598,14 +704,9 @@ bool ThrustStand::updateTorque()
 
     if (_accumulate_stats)
     {
-        _cumDataSet.values.torque += _currentDataSet.torque;
-        _cumDataSet.samples.torque++;
-
-        _cumDataSet.values.torque_cell_1 += _currentDataSet.torque_cell_1;
-        _cumDataSet.samples.torque_cell_1++;
-
-        _cumDataSet.values.torque_cell_2 += _currentDataSet.torque_cell_2;
-        _cumDataSet.samples.torque_cell_2++;
+        updateStats(_accuDataSet.torque, _currentDataSet.torque);
+        updateStats(_accuDataSet.torque_cell_1, _currentDataSet.torque_cell_1);
+        updateStats(_accuDataSet.torque_cell_2, _currentDataSet.torque_cell_2);
     }
 
     return true;

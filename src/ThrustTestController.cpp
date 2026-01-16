@@ -38,16 +38,17 @@ bool ThrustTestController::startTest()
 
     bool success = stand.tareSensors();
     stand.setControlMode(ThrottleControlMode::AUTOMATIC);
-    stand.resetCumulativeData(); // Reset stats in the stand
+    stand.resetAccumulativeData(); // Reset stats in the stand
     _status.step = 0;
     _step_start_ts = millis() + _step_accel_time_ms + 100;
 
-    float maxThrottle = stand.getMaxThrottlePercent();
-    if (maxThrottle < 100.f)
+    ThrustStandSafety standSafety = stand.getStandSafety();
+
+    if (standSafety.limits.maxThrottlePercent < 100.f)
     {
-        _status.total_steps = static_cast<int>(_max_total_steps * maxThrottle / 100.0f);
+        _status.total_steps = static_cast<int>(_max_total_steps * standSafety.limits.maxThrottlePercent / 100.0f);
         // Safety: ensure at least one step if throttle > 0
-        if (_status.total_steps < 1 && maxThrottle > 0.0f)
+        if (_status.total_steps < 1 && standSafety.limits.maxThrottlePercent > 0.0f)
             _status.total_steps = 1;
     }
     else
@@ -71,7 +72,8 @@ void ThrustTestController::stopTest(bool storeTestData)
     if (storeTestData)
     {
         ESP_LOGI(TAG, "Test completed and test data stored");
-        write_csv_to_littlefs("/last_test.csv", _status.total_steps, _config.csvFormat.format);
+        exportMeanCsv("/last_test_mean.csv", _status.total_steps, _config.csvFormat.format);
+        exportStatisticsCsv("/last_test_stats.csv", _status.total_steps, _config.csvFormat.format);
     }
     else
     {
@@ -83,16 +85,28 @@ void ThrustTestController::stopTest(bool storeTestData)
     _status.total_steps = 0;
     _status.progress = 0.0f;
 
-    stand.resetCumulativeData();
+    stand.resetAccumulativeData();
     stand.setControlMode(ThrottleControlMode::MANUAL);
 }
 
-// Run the test (call in main loop)
+// Run the test (called in main.cpp: task Sensor & Motor Task (Core 0)
 void ThrustTestController::runTest()
 {
-
+    // ---------- NO TEST RUNNING ----------
     if (!_status.running)
         return; // No test running
+
+    // ---------- SAFETY CHECK ----------
+    const ThrustStandSafety safety = stand.getStandSafety();
+    if (safety.state.tripped)
+    {
+        // Stop test immediately if tripped
+        stopTest(true); // or false depending if you want to finalize logging
+        ESP_LOGW(TAG, "Test halted: Safety trip active (%s @ %.2f)",
+                 stand.safetyTripReasonToString(safety.state.reason),
+                 safety.state.tripValue);
+        return;
+    }
 
     unsigned long now = millis();
 
@@ -131,7 +145,7 @@ void ThrustTestController::runTest()
 
     // ---------- STEP COMPLETE ----------
     stand.stopAccumulation();
-    test_data[_status.step] = stand.getAverage();
+    test_data[_status.step] = stand.getAccuDataSet();
     _status.step++;
     updateProgress();
 
@@ -171,17 +185,8 @@ void ThrustTestController::printFloat(File &f, float value, int precision, char 
     f.print(buf);
 }
 
-bool ThrustTestController::write_csv_to_littlefs(const char *path,
-                                                 uint32_t numberOfRecords,
-                                                 const char *csvFormat)
+void ThrustTestController::writeCsvMetadata(File &f)
 {
-
-    File f = LittleFS.open(path, "w");
-    if (!f)
-        return false;
-
-    char decimalSep = csvFormat[0];
-    char fieldSep = csvFormat[1];
 
     /* ---------- Metadata header ---------- */
     f.println("# ==================================");
@@ -192,9 +197,26 @@ bool ThrustTestController::write_csv_to_littlefs(const char *path,
     f.printf("# Motor Type    : %s\n", _config.metadata.motorType.c_str());
     f.printf("# ESC Type      : %s\n", _config.metadata.escType.c_str());
     f.printf("# Propeller Type: %s\n", _config.metadata.propellerType.c_str());
-    // f.printf("# Records: %lu\n", (unsigned long)numberOfRecords);
-    // f.printf("# Generated: %lu\n", (unsigned long)millis());
+    f.println("#");
+    f.println("# Derived values:");
+    f.println("# power_W        = voltage_mean * current_mean");
+    f.println("# thrust_ratio   = thrust_mean / power_W");
     f.println("# ==================================");
+}
+
+bool ThrustTestController::exportMeanCsv(const char *path,
+                                         uint32_t numberOfRecords,
+                                         const char *csvFormat)
+{
+
+    File f = LittleFS.open(path, "w");
+    if (!f)
+        return false;
+
+    char decimalSep = csvFormat[0];
+    char fieldSep = csvFormat[1];
+
+    writeCsvMetadata(f);
 
     f.printf(
         "step%c"
@@ -206,10 +228,9 @@ bool ThrustTestController::write_csv_to_littlefs(const char *path,
         "power_W%c"
         "rpm%c"
         "g/W%c"
-        "temp_C%c"
-        "temp_max_C\n",
+        "temp_C%c\n",
         fieldSep, fieldSep, fieldSep, fieldSep, fieldSep,
-        fieldSep, fieldSep, fieldSep, fieldSep, fieldSep);
+        fieldSep, fieldSep, fieldSep, fieldSep);
 
     for (uint32_t i = 0; i < numberOfRecords; i++)
     {
@@ -219,23 +240,125 @@ bool ThrustTestController::write_csv_to_littlefs(const char *path,
         f.print(fieldSep);
         printFloat(f, d.throttle, 1, decimalSep);
         f.print(fieldSep);
-        printFloat(f, d.thrust, 3, decimalSep);
+        printFloat(f, d.thrust.mean, 3, decimalSep);
         f.print(fieldSep);
-        printFloat(f, d.torque, 3, decimalSep);
+        printFloat(f, d.torque.mean, 3, decimalSep);
         f.print(fieldSep);
-        printFloat(f, d.voltage, 2, decimalSep);
+        printFloat(f, d.voltage.mean, 2, decimalSep);
         f.print(fieldSep);
-        printFloat(f, d.current, 2, decimalSep);
+        printFloat(f, d.current.mean, 2, decimalSep);
         f.print(fieldSep);
-        printFloat(f, d.power, 2, decimalSep);
+        printFloat(f, (d.current.mean * d.voltage.mean), 2, decimalSep);
         f.print(fieldSep);
-        printFloat(f, d.rpm, 0, decimalSep);
+        printFloat(f, d.rpm.mean, 0, decimalSep);
         f.print(fieldSep);
-        printFloat(f, d.thrust / d.power, 2, decimalSep);
+        printFloat(f, d.thrust.mean / (d.current.mean * d.voltage.mean), 2, decimalSep);
         f.print(fieldSep);
-        printFloat(f, d.temperature, 1, decimalSep);
+        printFloat(f, d.temperature.mean, 1, decimalSep);
+        f.println();
+    }
+
+    f.close();
+    return true;
+}
+
+void ThrustTestController::printStats(File &f,
+                                      const sensor_stats_t &s,
+                                      uint8_t decimals,
+                                      char decimalSep,
+                                      char fieldSep)
+{
+    printFloat(f, s.mean, decimals, decimalSep);
+    f.print(fieldSep);
+    printFloat(f, s.min, decimals, decimalSep);
+    f.print(fieldSep);
+    printFloat(f, s.max, decimals, decimalSep);
+    f.print(fieldSep);
+
+    float stddev = (s.n > 1) ? sqrtf(s.M2 / (s.n - 1)) : 0.0f;
+    printFloat(f, stddev, decimals, decimalSep);
+}
+
+bool ThrustTestController::exportStatisticsCsv(const char *path,
+                                               uint32_t numberOfRecords,
+                                               const char *csvFormat)
+{
+    File f = LittleFS.open(path, "w");
+    if (!f)
+        return false;
+
+    const char decimalSep = csvFormat[0];
+    const char fieldSep = csvFormat[1];
+
+    /* ---------- Metadata ---------- */
+    writeCsvMetadata(f);
+
+    /* ---------- Header ---------- */
+    f.printf(
+        "step%c"
+        "throttle_pct%c"
+
+        "thrust_mean_N%cthrust_min_N%cthrust_max_N%cthrust_std_N%c"
+        "torque_mean_Ncm%ctorque_min_Ncm%ctorque_max_Ncm%ctorque_std_Ncm%c"
+
+        "voltage_mean_V%cvoltage_min_V%cvoltage_max_V%cvoltage_std_V%c"
+        "current_mean_A%ccurrent_min_A%ccurrent_max_A%ccurrent_std_A%c"
+
+        "power_mean_W%c"
+        "rpm_mean%crpm_min%crpm_max%crpm_std%c"
+
+        "thrust_ratio%c"
+        "temp_mean_C%ctemp_min_C%ctemp_max_C%ctemp_std_C\n",
+
+        fieldSep,
+        fieldSep,
+
+        fieldSep, fieldSep, fieldSep, fieldSep,
+        fieldSep, fieldSep, fieldSep, fieldSep,
+
+        fieldSep, fieldSep, fieldSep, fieldSep,
+        fieldSep, fieldSep, fieldSep, fieldSep,
+
+        fieldSep,
+        fieldSep, fieldSep, fieldSep, fieldSep,
+
+        fieldSep,
+        fieldSep, fieldSep, fieldSep);
+
+    /* ---------- Data ---------- */
+    for (uint32_t i = 0; i < numberOfRecords; i++)
+    {
+        const auto &d = test_data[i];
+
+        f.print(i);
         f.print(fieldSep);
-        printFloat(f, d.temperature_max, 2, decimalSep);
+        printFloat(f, d.throttle, 1, decimalSep);
+        f.print(fieldSep);
+
+        printStats(f, d.thrust, 3, decimalSep, fieldSep);
+        f.print(fieldSep);
+        printStats(f, d.torque, 3, decimalSep, fieldSep);
+        f.print(fieldSep);
+        printStats(f, d.voltage, 2, decimalSep, fieldSep);
+        f.print(fieldSep);
+        printStats(f, d.current, 2, decimalSep, fieldSep);
+        f.print(fieldSep);
+
+        /* power from mean values */
+        float power = d.voltage.mean * d.current.mean;
+        printFloat(f, power, 2, decimalSep);
+        f.print(fieldSep);
+
+        printStats(f, d.rpm, 0, decimalSep, fieldSep);
+        f.print(fieldSep);
+
+        /* thrust ratio from mean values */
+        float thrustRatio = (power > 0.0f) ? (d.thrust.mean / power) : 0.0f;
+        printFloat(f, thrustRatio, 2, decimalSep);
+        f.print(fieldSep);
+
+        printStats(f, d.temperature, 1, decimalSep, fieldSep);
+
         f.println();
     }
 

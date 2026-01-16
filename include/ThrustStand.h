@@ -20,8 +20,6 @@
  * Contains all machine-level numeric data from sensors and calculations.
  * Used for:
  *  - Current live data snapshot
- *  - Accumulated/cumulative statistics
- *  - Averaged values via getAverage()
  */
 typedef struct
 {
@@ -32,40 +30,121 @@ typedef struct
     float torque_cell_2;   ///< Raw torque load cell 2 value
     float voltage;         ///< Bus voltage [V]
     float current;         ///< Measured current [A]
-    float power;           ///< Calculated electrical power [W]
-    float thrust_ratio;    ///< Calculated thrust /electrical power [W]
     float rpm;             ///< Motor speed in RPM
     float temperature;     ///< Measured temperature [°C]
-    float temperature_max; ///< Maximum recorded temperature [°C]
 } test_data_t;
 
-/**
- * @brief Per-sensor sample counters for statistics accumulation.
- *
- * Tracks the number of samples taken for each sensor channel.
- */
-typedef struct
+struct sensor_stats_t
 {
-    uint32_t thrust;        ///< Number of thrust samples
-    uint32_t torque;        ///< Number of torque samples
-    uint32_t torque_cell_1; ///< Number of torque cell 1 samples
-    uint32_t torque_cell_2; ///< Number of torque cell 2 samples
-    uint32_t voltage;       ///< Number of voltage samples
-    uint32_t current;       ///< Number of current samples
-    uint32_t rpm;           ///< Number of RPM samples
-    uint32_t temperature;   ///< Number of temperature samples
-} test_data_samples_t;
+    float mean;
+    float M2;
+    float min;
+    float max;
+    uint32_t n;
+};
 
 /**
  * @brief Accumulated statistics data.
  *
  * Stores the summed values and the corresponding sample counts for each sensor channel.
  */
+struct test_data_accu_t
+{
+    float throttle;
+    sensor_stats_t thrust;
+    sensor_stats_t torque;
+    sensor_stats_t torque_cell_1;
+    sensor_stats_t torque_cell_2;
+    sensor_stats_t voltage;
+    sensor_stats_t current;
+    sensor_stats_t rpm;
+    sensor_stats_t temperature;
+};
+
+/**
+ * @brief Aggregated safety and operational limits of the thrust stand.
+ *
+ * Defines absolute upper bounds for critical electrical and mechanical
+ * parameters. These limits are enforced by the thrust stand controller
+ * to protect hardware and ensure safe operation.
+ *
+ * A limit value of zero or less may be interpreted as "disabled"
+ * depending on the specific parameter and implementation.
+ *
+ * This structure contains configuration data only and does not
+ * represent measured state or control logic.
+ */
 typedef struct
 {
-    test_data_t values;          ///< Accumulated sums
-    test_data_samples_t samples; ///< Number of samples per sensor
-} test_data_accu_t;
+    float maxCurrentA = 50.0f;        ///< Maximum allowed motor current [A]
+    float maxThrottlePercent = 100.f; ///< Maximum allowed throttle [%]
+    float maxVoltageV = 27.f;         ///< Maximum allowed supply voltage [V]
+    float maxThrustGF = 2000.f;       ///< Maximum allowed thrust [gf]
+} ThrustStandLimits;
+
+/**
+ * @brief Identifies the primary cause of a safety trip condition.
+ *
+ * Enumerates all protection and supervision conditions that may
+ * trigger a safety-related shutdown of the thrust stand.
+ *
+ * The listed reasons represent high-level fault categories and are
+ * intended for diagnostics, logging, and user feedback. Detailed
+ * sensor data should be captured separately if required.
+ */
+enum class SafetyTripReason : uint8_t
+{
+    SAFETY_TRIP_NONE = 0, ///< No active safety trip
+
+    SAFETY_TRIP_OVER_CURRENT,     ///< Motor current exceeded configured limit
+    SAFETY_TRIP_OVER_VOLTAGE,     ///< Supply voltage exceeded configured limit
+    SAFETY_TRIP_OVER_THRUST,      ///< Measured thrust exceeded configured limit
+    SAFETY_TRIP_OVER_TEMPERATURE, ///< Temperature exceeded configured limit,
+
+    SAFETY_TRIP_SENSOR_FAILURE,   ///< Invalid or implausible sensor data, TO BE IMPLEMENTED
+    SAFETY_TRIP_ACTUATOR_FAILURE, ///< Motor, ESC, or actuator failure, TO BE IMPLEMENTED
+    SAFETY_TRIP_CONTROL_FAULT,    ///< Internal control or state machine error, TO BE IMPLEMENTED
+
+    SAFETY_TRIP_USER_ABORT,        ///< User-initiated abort, TO BE IMPLEMENTED
+    SAFETY_TRIP_EXTERNAL_INTERLOCK ///< External interlock triggered, TO BE IMPLEMENTED, safety housing open
+};
+
+/**
+ * @brief Aggregated safety status of the thrust stand.
+ *
+ * Represents the current safety supervision status of the system.
+ * A safety trip indicates that an operational limit or protection
+ * condition has been violated.
+ */
+typedef struct
+{
+    bool tripped = false; ///< Indicates an active safety trip condition
+
+    /**
+     * @brief Measured value at the time of the safety trip.
+     *
+     * Stores the sensor value that caused the safety trip
+     * (e.g. current, voltage, thrust), depending on the
+     * reported @ref reason. Valid only when @ref tripped is true.
+     */
+    float tripValue = 0.0f;
+
+    /**
+     * @brief Primary cause of the safety trip.
+     *
+     * Identifies the protection condition that caused the system
+     * to enter a safety trip state. Valid only when @ref tripped
+     * is true.
+     */
+    SafetyTripReason reason = SafetyTripReason::SAFETY_TRIP_NONE;
+
+} ThrustStandSafetyState;
+
+struct ThrustStandSafety
+{
+    ThrustStandLimits limits;     ///< Configured safety limits
+    ThrustStandSafetyState state; ///< Current safety status
+};
 
 /**
  * @brief Source of throttle commands.
@@ -217,14 +296,126 @@ public:
     void setControlMode(ThrottleControlMode mode);
 
     /**
-     * @brief Get maximum allowed throttle percentage.
+     * @brief Configure the maximum allowed throttle limit.
+     *
+     * Defines an upper bound for the commanded throttle value. The controller
+     * shall clamp any requested throttle to this limit.
+     *
+     * @note This limit is applied continuously during normal operation.
+     * @note A value of 100.0f disables throttle limiting.
      */
-    float getMaxThrottlePercent() const { return _motor.getMaxThrottlePercent(); }
+    void setThrottleLimitPercent(float percent);
 
     /**
-     * @brief Set maximum allowed throttle percentage.
+     * @brief Configure the maximum allowed motor current limit.
+     *
+     * Defines the absolute upper limit for measured motor current.
+     *
+     * @note Currently, this value is stored as a configuration parameter only.
+     * @todo Implement runtime monitoring and trigger
+     *       SafetyTripReason::SAFETY_TRIP_OVER_CURRENT when exceeded.
      */
-    void setMaxThrottlePercent(float maxPercent);
+    void setCurrentLimitA(float maxCurrentA);
+
+    /**
+     * @brief Configure the maximum allowed motor supply voltage limit.
+     *
+     * Defines the absolute upper limit for measured motor supply voltage.
+     *
+     * @note Currently, this value is stored as a configuration parameter only.
+     * @todo Implement runtime monitoring and trigger
+     *       SafetyTripReason::SAFETY_TRIP_OVER_VOLTAGE when exceeded.
+     */
+    void setVoltageLimitV(float maxVoltageV);
+
+    /**
+     * @brief Configure the maximum allowed thrust limit.
+     *
+     * Defines the absolute upper limit for measured thrust force in gf.
+     * When the measured thrust exceeds this limit, the system should
+     * trigger a safety trip (SAFETY_TRIP_OVER_THRUST).
+     *
+     * @param maxThrustGF Maximum allowed thrust in gram-force.
+     *
+     * @note Currently, this value is stored as a configuration parameter only.
+     * @todo Implement runtime monitoring to trigger
+     *       SafetyTripReason::SAFETY_TRIP_OVER_THRUST when exceeded.
+     */
+    void setThrustLimitGF(float maxThrustGF);
+
+    /**
+     * @brief Convert a SafetyTripReason enum value to a human-readable string.
+     *
+     * Useful for logging, UI display, or JSON responses.
+     *
+     * @param r SafetyTripReason value.
+     * @return const char* String representing the enum value.
+     */
+    static const char *safetyTripReasonToString(SafetyTripReason r);
+
+    /**
+     * @brief Manually clear an active safety trip.
+     *
+     * Resets the _safety.state.tripped flag and the associated reason/value.
+     * After calling this, the motor and throttle control may be re-enabled.
+     *
+     * @note Only clears the trip on the software side. Motors should still
+     *       remain disabled until user acknowledges and/or restarts a test.
+     */
+    void clearSafetyTrip();
+
+    /**
+     * @brief Check all safety limits against the current sensor readings.
+     *
+     * Compares measured values (throttle, current, voltage, thrust, temperature, etc.)
+     * with the configured limits and sets _safety.state.tripped if any limit is exceeded.
+     *
+     * @return true if all limits are within safe ranges, false if a safety trip occurred.
+     *
+     * @note This function is intended to be called in the main update loop.
+     * @todo Extend to include additional safety checks (e.g., actuator health, sensor plausibility).
+     */
+    bool checkSafetyLimits();
+
+    /**
+     * @brief Retrieve the current safety configuration and state.
+     *
+     * Returns the aggregated safety supervision data, including configured
+     * safety limits and the current safety trip status.
+     *
+     * @note The returned structure represents a snapshot of the current
+     *       safety state and configuration.
+     * @note Modifying the returned value does not affect internal state.
+     */
+    const ThrustStandSafety getStandSafety() const { return _safety; }
+
+    /**
+     * @brief Check whether the propeller cage is open.
+     *
+     * This method reads the digital input connected to the normally-closed
+     * propeller cage switch. A LOW reading indicates that the cage is open
+     * or disconnected, which is considered an unsafe condition.
+     *
+     * @return true if the cage is open (unsafe), false if closed (safe).
+     *
+     * @note The cage switch is a fail-safe NC switch. If disconnected, this
+     *       function will return true (unsafe).
+     */
+    bool isCageOpen() const;
+
+    /**
+     * @brief Determine if it is safe to arm the motor.
+     *
+     * Combines hardware interlocks to ensure the system can be safely armed.
+     * The motor may only be armed if the E-Stop is not triggered and the
+     * propeller cage is closed.
+     *
+     * @return true if it is safe to arm the motor, false otherwise.
+     *
+     * @see isCageOpen()
+     * @see HardwareEstop::isTriggered()
+     */
+    bool isSafeToArm() const;
 
     /**
      * @brief Get current motor ESC state.
@@ -356,12 +547,7 @@ public:
      *
      * @return Accumulated measurement values and sample counts
      */
-    test_data_accu_t getCumDataSet() const { return _cumDataSet; }
-
-    /**
-     * @brief Get averaged values based on accumulated data.
-     */
-    test_data_t getAverage() const;
+    test_data_accu_t getAccuDataSet() const { return _accuDataSet; }
 
     /**
      * @brief Start accumulating statistics for averaging.
@@ -376,7 +562,7 @@ public:
     /**
      * @brief Reset cumulative data and sample counters.
      */
-    void resetCumulativeData();
+    void resetAccumulativeData();
 
     /**
      * @brief Get the machine-level state snapshot.
@@ -397,8 +583,8 @@ private:
 
     ThrustStandState _state;
 
-    static test_data_t _currentDataSet;  ///< Current live data snapshot
-    static test_data_accu_t _cumDataSet; ///< Cumulative data for statistics
+    static test_data_t _currentDataSet;   ///< Current live data snapshot
+    static test_data_accu_t _accuDataSet; ///< Cumulative data for statistics
 
     bool _accumulate_stats = false; ///< Enable statistics accumulation
 
@@ -428,6 +614,9 @@ private:
     bool updateCurrent();
     bool updateVoltage();
     bool updateTemperature();
+
+    ThrustStandSafety _safety;
+    void triggerSafetyTrip(SafetyTripReason r, float value);
 
     /**
      * @brief Load configuration from non-volatile storage.

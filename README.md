@@ -195,12 +195,12 @@ Image files are stored in the `media/` directory using a consistent naming schem
 Each automated test step records:
 
 - Throttle percentage
-- Thrust (g)
+- Thrust (gf)
 - Torque (Ncm)
 - Voltage (V)
 - Current (A)
 - Electrical power (W)
-- Efficency (g/W)
+- Efficency (gf/W)
 - RPM
 - Temperature (°C)
 

@@ -131,10 +131,7 @@ bool MotorESC::update()
     return true;
 }
 
-void MotorESC::setMaxThrottlePercent(float maxPercent)
-{
-    _maxThrottlePercent = constrain(maxPercent, 0.0f, 100.0f);
-}
+
 
 float MotorESC::setThrottle(float throttlePercent,
                             bool smooth,
@@ -142,8 +139,6 @@ float MotorESC::setThrottle(float throttlePercent,
 {
     if (!canActuate() || _state != EscState::ARMED && _state != EscState::RUNNING)
         return 0.0f;
-
-    throttlePercent = constrain(throttlePercent, 0.0f, _maxThrottlePercent);
 
     if (smooth)
     {
@@ -220,8 +215,6 @@ bool MotorESC::isAtTargetSpeed(float tolerance) const
 
 void MotorESC::applyThrottle(float throttlePercent)
 {
-    throttlePercent = constrain(throttlePercent, 0.0f, _maxThrottlePercent);
-
     uint16_t pulse = map(throttlePercent * 100, 0, 10000,
                          _minPulseUs, _maxPulseUs);
 

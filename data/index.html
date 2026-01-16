@@ -179,18 +179,34 @@ hr {
 
 
 /* -------- Grid / Layout Helpers-----*/
-
-.two-col {
+.three-col {
     display: grid;
-    grid-template-columns: minmax(420px, 600px) 1fr;
+    grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr) minmax(240px, 1fr);
     gap: 22px;
-	row-gap: 12px; 
+    row-gap: 12px;
 }
 
-@media (max-width: 900px) {
-    .two-col {
+@media (max-width: 1200px) {
+    .three-col {
         grid-template-columns: 1fr;
     }
+}
+
+/* Safety banner styles */
+.safety-banner {
+    background-color: #b71c1c; /* dark red */
+    color: #fff;
+    font-weight: bold;
+    padding: 12px;
+    text-align: center;
+    border-radius: 6px;
+    display: none; /* hidden by default */
+    animation: flashRed 1s infinite alternate;
+}
+
+@keyframes flashRed {
+    0% { background-color: #b71c1c; }
+    100% { background-color: #f44336; }
 }
 
 
@@ -346,87 +362,58 @@ progress::-webkit-progress-value {
 	<section id="live">
 		<h2>Live</h2>
 
-		<div class="two-col">
-			<!-- Left column -->
+		<div class="three-col">
+			<!-- Left column: motor sensors -->
 			<div>
 				<div class="field">
 					<label>Throttle:</label>
-					<input type="range" id="throttle" min="0" max="100"
-						   oninput="setThrottle(this.value)">
+					<input type="range" id="throttle" min="0" max="100" oninput="onThrottleChange(this.value)">
 					<span id="throttleVal">0</span> %
 				</div>
-
-				<div class="field">
-					<label>Thrust:</label>
-					<span id="thrust">0</span> gf
-				</div>
-
-				<div class="field">
-					<label>Torque:</label>
-					<span id="torque">0</span> Ncm
-				</div>
-
-				<div class="field">
-					<label>Torque Cell 1:</label>
-					<span id="torqueCell1">0</span> gf
-				</div>
-
-				<div class="field">
-					<label>Torque Cell 2:</label>
-					<span id="torqueCell2">0</span> gf
-				</div>
-				
-				<div class="field">
-					<label>RPM:</label>
-					<span id="rpm">0</span>
-				</div>
+				<div class="field"><label>Thrust:</label> <span id="thrust">0</span> gf</div>
+				<div class="field"><label>Torque:</label> <span id="torque">0</span> Ncm</div>
+				<div class="field"><label>Torque Cell 1:</label> <span id="torqueCell1">0</span> gf</div>
+				<div class="field"><label>Torque Cell 2:</label> <span id="torqueCell2">0</span> gf</div>
+				<div class="field"><label>RPM:</label> <span id="rpm">0</span></div>
 			</div>
 
-			<!-- Right column -->
+			<!-- Middle column: electrical -->
 			<div>
-				<div class="field">
-					<label>Voltage:</label>
-					<span id="voltage">0</span> V
-				</div>
-
-				<div class="field">
-					<label>Current:</label>
-					<span id="current">0</span> A
-				</div>
-
-				<div class="field">
-					<label>Power:</label>
-					<span id="power">0</span> W
-				</div>
-
-				<div class="field">
-					<label>Thrust Ratio:</label>
-					<span id="thrust_ratio">0</span> g/W
-				</div>
-
-				<div class="field">
-					<label>Temperature:</label>
-					<span id="temperature">0</span> °C
-				</div>
-
-				<div class="field">
-					<label>Max Temperature:</label>
-					<span id="temperature_max">0</span> °C
-				</div>
-				
-				<div class="field button-group">
-				<button onclick="tare(event)">Tare Sensors</button>
-				<div>
+				<div class="field"><label>Voltage:</label> <span id="voltage">0</span> V</div>
+				<div class="field"><label>Current:</label> <span id="current">0</span> A</div>
+				<div class="field"><label>Power:</label> <span id="power">0</span> W</div>
+				<div class="field"><label>Thrust Ratio:</label> <span id="thrust_ratio">0</span> g/W</div>
+				<div class="field"><label>Temperature:</label> <span id="temperature">0</span> °C</div>
+				<div class="field"><label>Max Temperature:</label> <span id="temperature_max">0</span> °C</div>
 			</div>
+
+			<!-- Right column: Safety Trip -->
+			<div id="safetyColumn">
+				<div class="safety-banner" id="safetyBanner">
+					<strong>SAFETY TRIP ACTIVE!</strong>
+				</div>
+				<div class="field">
+					<label>Trip Reason:</label>
+					<span id="safetyTripReason">—</span>
+				</div>
+				<div class="field">
+					<label>Trip Value:</label>
+					<span id="safetyTripValue">0</span>
+				</div>
+				<div class="field button-group">
+					<button onclick="clearSafetyTrip()">Clear Safety Trip</button>
+				</div>
+				<div class="field button-group"><button onclick="tare(event)">Tare Sensors</button></div>
 			</div>
 		</div>
 	</section>
+
 
 	
 	<section id="test">
 		<h2>Test</h2>
 
-		<div class="two-col">
+		<div class="three-col">
 			<!-- Left column -->
 			<div>
 				<div class="field">
@@ -453,7 +440,7 @@ progress::-webkit-progress-value {
 
 			</div>
 
-			<!-- Right column -->
+			<!-- Middle column -->
 			<div>
 				<div class="field">
 					<label for="motor_type">Motor Type:</label>
@@ -479,11 +466,24 @@ progress::-webkit-progress-value {
 					</select>
 				</div>
 
+
+			</div>
+			<!-- Right column -->
+			<div>
 				<div class="field button-group">
 					<button onclick="startTest()">Start Test</button>
-					<button onclick="stopTest()">Stop Test</button>
-					<button onclick="downloadCSV()">Download CSV</button>
 				</div>
+				<div class="field button-group">
+					<button onclick="stopTest()">Stop Test</button>
+				</div>
+					<div class="field button-group">
+						<button onclick="downloadMeanCSV()">Download Mean CSV</button>
+					</div>
+
+					<div class="field button-group">
+						<button onclick="downloadStatsCSV()">Download Statistics CSV</button>
+					</div>
+				
 			</div>
 		</div>
 	</section>
@@ -492,7 +492,7 @@ progress::-webkit-progress-value {
 	<section id="system">
 		<h2>System State</h2>
 
-		<div class="two-col">
+		<div class="three-col">
 			<!-- LEFT -->
 			<div>
 				<div class="state-grid">
@@ -505,7 +505,7 @@ progress::-webkit-progress-value {
 				</div>
 			</div>
 
-			<!-- RIGHT (intentionally empty) -->
+			<!-- Middle column -->
 			<div>
 				<div class="state-grid">
 
@@ -514,6 +514,57 @@ progress::-webkit-progress-value {
 				</div>
 
 			</div>
+			<!-- Right column -->
+			<div>
+			</div>			
+		</div>
+	</section>
+	
+	<section id="safety">
+		<h2>Safety Limits</h2>
+		<p class="hint">
+			Limits are enforced during operation and may trigger a safety shutdown if exceeded.
+		</p>
+
+		<div class="three-col">
+			<!-- LEFT -->
+			<div>
+
+				<div class="setup-row-3">
+					<label for="limitThrottlePercent">Throttle Limit (%):</label>
+					<input type="number" id="limitThrottlePercent" step="1">
+					<button onclick="setThrottleLimit()">Set</button>
+					<hr>
+				</div>
+
+				<div class="setup-row-3">
+					<label for="limitCurrentA">Current Limit (A):</label>
+					<input type="number" id="limitCurrentA" step="0.1">
+					<button onclick="setCurrentLimit()">Set</button>
+					<hr>
+				</div>
+
+			</div>
+
+			<!-- Middle column -->
+			<div>
+
+				<div class="setup-row-3">
+					<label for="limitVoltageV">Voltage Limit (V):</label>
+					<input type="number" id="limitVoltageV" step="0.1">
+					<button onclick="setVoltageLimit()">Set</button>
+					<hr>
+				</div>
+
+				<div class="setup-row-3">
+					<label for="limitThrustGF">Thrust Limit (gf):</label>
+					<input type="number" id="limitThrustGF" step="10">
+					<button onclick="setThrustLimit()">Set</button>
+				</div>
+			</div>
+			<!-- Right column -->
+			<div>
+			</div>
 		</div>
 	</section>
 
@@ -521,101 +572,93 @@ progress::-webkit-progress-value {
 	<section id="calibration">
 		<h2>Calibration</h2>
 
-		<div class="two-col">
+		<div class="three-col">
 			<!-- LEFT -->
 			<div>
-
-			<div class="setup-row-3">
-
-				<label for="maxThrottlePercent">Max Throttle:</label>
-				<input type="number" id="maxThrottlePercent" step="1">
-				<button onclick="setMaxThrottlePercent()">Set</button>
-				<hr>
-			</div>
-
 			
-			<div class="setup-row-3">
-				<label for="calFactor">Thrust Cal-Factor:</label>
-				<input type="number" id="calFactor" step="0.01">
-				<button onclick="setThrustCal()">Set</button>
-				<hr>
-			</div>
-
-			<div class="setup-group">
-				<div class="setup-title">Torque Calibration</div>
-
-				<div class="setup-row">
-					<label for="torqueCalFactor1">Torque Cal-Factor 1:</label>
-					<input type="number" id="torqueCalFactor1" step="0.01">
+				<div class="setup-row-3">
+					<label for="calFactor">Thrust Cal-Factor:</label>
+					<input type="number" id="calFactor" step="0.01">
+					<button onclick="setThrustCal()">Set</button>
+					<hr>
 				</div>
 
-				<div class="setup-row">
-					<label for="torqueCalFactor2">Torque Cal-Factor 2:</label>
-					<input type="number" id="torqueCalFactor2" step="0.01">
+				<div class="setup-group">
+					<div class="setup-title">Torque Calibration</div>
+
+					<div class="setup-row">
+						<label for="torqueCalFactor1">Torque Cal-Factor 1:</label>
+						<input type="number" id="torqueCalFactor1" step="0.01">
+					</div>
+
+					<div class="setup-row">
+						<label for="torqueCalFactor2">Torque Cal-Factor 2:</label>
+						<input type="number" id="torqueCalFactor2" step="0.01">
+					</div>
+
+					<div class="setup-row">
+						<label for="torqueDistance">Loadcell Distance (mm):</label>
+						<input type="number" id="torqueDistance" step="1">
+					</div>
+
+					<div class="setup-row">
+						<span></span>
+						<button onclick="setTorqueCalibration()">Set Torque Calibration</button>
+					</div>
 				</div>
-
-				<div class="setup-row">
-					<label for="torqueDistance">Loadcell Distance (mm):</label>
-					<input type="number" id="torqueDistance" step="1">
-				</div>
-
-				<div class="setup-row">
-					<span></span>
-					<button onclick="setTorqueCalibration()">Set Torque Calibration</button>
-				</div>
-			</div>
-
-			
-
 
 			</div>
-			<!-- RIGHT column -->
+			<!-- Middle column -->
 			<div>
 				<div class="setup-row-3">
 
-				<label for="currentSensitivity">Current Sensitivity (voltsPerAmp):</label>
-				<input type="number" id="currentSensitivity" step="0.001">
-				<button onclick="setCurrentSensitivity()">Set</button>
+					<label for="currentSensitivity">Current Sensitivity (voltsPerAmp):</label>
+					<input type="number" id="currentSensitivity" step="0.001">
+					<button onclick="setCurrentSensitivity()">Set</button>
 
-			</div>
+				</div>
 			
-			<div class="setup-row-3">
-				<label for="actualCurrent">Actual Current (A):</label>
-				<input type="number" id="actualCurrent" step="0.01" placeholder="Enter known current from PSU">
-				<button onclick="calibrateCurrentSensor()">Set</button>
-				
-				<hr>
-			</div>
+				<div class="setup-row-3">
+					<label for="actualCurrent">Actual Current (A):</label>
+					<input type="number" id="actualCurrent" step="0.01" placeholder="Enter known current from PSU">
+					<button onclick="calibrateCurrentSensor()">Set</button>
+					
+					<hr>
+				</div>
 			
-			<div>
+
 				<div class="setup-row-3">
 
 				<label for="voltageCalibration">Voltage Calibration:</label>
 				<input type="number" id="voltageCalibration" step="0.01">
 				<button onclick="setVoltageCalibration()">Set</button>
 				<hr>
+				</div>
+
+
 			</div>
-		
-			<div class="setup-group">
-				<div class="setup-title">ESC PWM Range</div>
+			<!-- Right column -->
+			<div>
+				<div class="setup-group">
+					<div class="setup-title">ESC PWM Range</div>
 
-				<div class="setup-row">
-					<label for="minPulseUs">Min Pulse (µs):</label>
-					<input type="number" id="minPulseUs" step="1">
+					<div class="setup-row">
+						<label for="minPulseUs">Min Pulse (µs):</label>
+						<input type="number" id="minPulseUs" step="1">
+					</div>
+
+					<div class="setup-row">
+						<label for="maxPulseUs">Max Pulse (µs):</label>
+						<input type="number" id="maxPulseUs" step="1">
+					</div>
+
+					<div class="setup-row">
+						<span></span>
+						<button onclick="setPulseRangeUs()">Set ESC PWM Range</button>
+					</div>
+					
 				</div>
 
-				<div class="setup-row">
-					<label for="maxPulseUs">Max Pulse (µs):</label>
-					<input type="number" id="maxPulseUs" step="1">
-				</div>
-
-				<div class="setup-row">
-					<span></span>
-					<button onclick="setPulseRangeUs()">Set ESC PWM Range</button>
-				</div>
-				
-			</div>
-			
 			</div>
 		</div>
 	</section>
@@ -660,12 +703,6 @@ progress::-webkit-progress-value {
                     cfg.thrust_cal.toFixed(2);
             }
 			
-			/* ------- Max. Thrust -------- */
-            if (cfg.thrust_max !== undefined) {
-                document.getElementById('maxThrottlePercent').value =
-                    cfg.thrust_max.toFixed(2);
-            }
-
             /* ---------- Torque ---------- */
             if (cfg.torque_cal1 !== undefined) {
                 document.getElementById('torqueCalFactor1').value =
@@ -710,34 +747,15 @@ progress::-webkit-progress-value {
             console.warn("Failed to load config:", err);
         });
     }
-	
-	function setMaxThrottlePercent() {
-		const val = parseFloat(document.getElementById('maxThrottlePercent').value) || 0;
 
-		// Prüfen auf gültigen Bereich (optional)
-		if (val < 0 || val > 100) {
-			alert("Max Throttle muss zwischen 0 und 100 liegen.");
-			return;
-		}
-
-		const params = new URLSearchParams();
-		params.append('thrust_max', val);
-
-		fetch('/config', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/x-www-form-urlencoded'
-			},
-			body: params.toString()
-		})
-		.then(r => {
-			if (!r.ok) throw new Error("Save failed");
-			alert("Max Throttle saved: " + val + "%");
-		})
-		.catch(err => {
-			alert("Error during save!");
-			console.error(err);
-		});
+	// Manual reset Safety button
+	function clearSafetyTrip() {
+		fetch('/api/safety/clear', { method: 'POST' })
+			.then(r => {
+				if (!r.ok) throw new Error("Failed to clear safety trip");
+				console.log("Safety trip cleared");
+			})
+			.catch(err => alert(err));
 	}
 	
 	function setCurrentSensitivity() {
@@ -763,6 +781,91 @@ progress::-webkit-progress-value {
 			console.error(err);
 		});
 	}
+	
+	function postParam(endpoint, value)
+	{
+		fetch(endpoint, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/x-www-form-urlencoded"
+			},
+			body: "value=" + encodeURIComponent(value)
+		})
+		.then(response => {
+			if (!response.ok) {
+				throw new Error("Request failed");
+			}
+		})
+		.catch(err => {
+			console.error("Failed to POST", endpoint, err);
+			alert("Failed to set value");
+		});
+	}
+	
+	function setThrottleLimit()
+	{
+		const value = parseFloat(
+			document.getElementById("limitThrottlePercent").value|| 0;
+		);
+		
+		// Prüfen auf gültigen Bereich (optional)
+		if (val < 0 || val > 100) {
+			alert("Max Throttle muss zwischen 0 und 100 liegen.");
+			return;
+		}
+		if (isNaN(value)) {
+			alert("Invalid throttle limit");
+			return;
+		}
+
+		postParam("/api/safety/limit/throttle", value);
+	}
+	
+
+	function setCurrentLimit()
+	{
+		const value = parseFloat(
+			document.getElementById("limitCurrentA").value
+		);
+
+		if (isNaN(value)) {
+			alert("Invalid current limit");
+			return;
+		}
+
+		postParam("/api/safety/limit/current", value);
+	}
+	
+	function setVoltageLimit()
+	{
+		const value = parseFloat(
+			document.getElementById("limitVoltageV").value
+		);
+
+		if (isNaN(value)) {
+			alert("Invalid voltage limit");
+			return;
+		}
+
+		postParam("/api/safety/limit/voltage", value);
+	}
+
+	function setThrustLimit()
+	{
+		const value = parseFloat(
+			document.getElementById("limitThrustGF").value
+		);
+
+		if (isNaN(value)) {
+			alert("Invalid thrust limit");
+			return;
+		}
+
+		postParam("/api/safety/limit/thrust", value);
+	}
+
+
+
 
 	function calibrateCurrentSensor() {
 		const actualCurrent = parseFloat(document.getElementById('actualCurrent').value);
@@ -847,10 +950,10 @@ progress::-webkit-progress-value {
         })
         .then(r => {
             if (!r.ok) throw new Error("Save failed");
-            alert("Cal-Factor gespeichert");
+            alert("Cal-Factor saved");
         })
         .catch(err => {
-            alert("Fehler beim Speichern");
+            alert("Error during save");
             console.error(err);
         });
     }
@@ -874,10 +977,10 @@ progress::-webkit-progress-value {
 		})
 		.then(r => {
 			if (!r.ok) throw new Error("Save failed");
-			alert("Torque-Kalibrierung gespeichert");
+			alert("Torque-Calibration saved");
 		})
 		.catch(err => {
-			alert("Fehler beim Speichern");
+			alert("Error during save");
 			console.error(err);
 		});
 	}
@@ -902,7 +1005,7 @@ progress::-webkit-progress-value {
 			alert("ESC Settings saved");
 		})
 		.catch(err => {
-			alert("Fehler beim Speichern");
+			alert("Error during save");
 			console.error(err);
 		});
 	}
@@ -911,7 +1014,7 @@ progress::-webkit-progress-value {
        LIVE STATUS
     ------------------------------*/
 
-    function fetchStatus() {
+    function updateLiveStatus() {
         fetch('/status')
             .then(r => r.json())
             .then(data => {
@@ -932,7 +1035,20 @@ progress::-webkit-progress-value {
                     data.throttle.toFixed(1);
                 document.getElementById('throttle').value =
                     data.throttle.toFixed(1);
-					
+
+			 // Safety
+				const tripped = data.safety_tripped;
+				const banner = document.getElementById('safetyBanner');
+				if (tripped) {
+					banner.style.display = 'block';
+					document.getElementById('safetyTripReason').innerText = data.safety_trip_reason;
+					document.getElementById('safetyTripValue').innerText = data.safety_trip_value.toFixed(2);
+				} else {
+					banner.style.display = 'none';
+					document.getElementById('safetyTripReason').innerText = '—';
+					document.getElementById('safetyTripValue').innerText = '0';
+				}
+	
 				/* ---------- Test Status ---------- */
 				if (data.test_running !== undefined) {
 
@@ -963,7 +1079,7 @@ progress::-webkit-progress-value {
             });
     }
 
-    setInterval(fetchStatus, 500);
+    setInterval(updateLiveStatus, 500);
 
 	/* -----------------------------
 	   SYSTEM STATE MAPPING
@@ -1055,6 +1171,25 @@ progress::-webkit-progress-value {
        STEUERUNG
     ------------------------------*/
 
+	function onThrottleChange(value) {
+		const tripped = document.getElementById('safetyBanner').style.display === 'block';
+
+		if (tripped) {
+			alert("Motor disabled: safety trip active!");
+			// Prevent any movement while safety trip is active
+			const slider = document.getElementById('throttle');
+			slider.value = 0;                   // reset to 0
+			document.getElementById('throttleVal').innerText = "0";
+			return;                              // ignore input
+		}
+
+		// Normal operation: update slider value
+		document.getElementById('throttleVal').innerText = parseFloat(value).toFixed(1);
+
+		// Send new throttle to ESP32 (existing function)
+		setThrottle(parseFloat(value));
+	}
+
     function setThrottle(val) {
         document.getElementById('throttleVal').innerText = val;
 
@@ -1094,9 +1229,23 @@ progress::-webkit-progress-value {
         fetch('/api/test/stop', { method: 'POST' });
     }
 
-    function downloadCSV() {
-        window.location.href = '/downloadCSV';
-    }
+	function downloadMeanCSV()
+	{
+	    if (testRunning) {
+			alert("Please stop the test before downloading results.");
+			return;
+		}
+		window.location.href = "/api/export/csv/mean";
+	}
+
+	function downloadStatsCSV()
+	{
+		  if (testRunning) {
+			alert("Please stop the test before downloading results.");
+			return;
+		}
+		window.location.href = "/api/export/csv/statistics";
+	}
 	
 	function loadTestMetadata() {
 		fetch("/api/test/metadata")
@@ -1129,14 +1278,20 @@ progress::-webkit-progress-value {
     /* -----------------------------
        INIT
     ------------------------------*/
-    window.onload = () => {
-		document.getElementById('throttle').value = 0;
-		document.getElementById('throttleVal').innerText = "0";
-        loadConfig();
+	window.onload = () => {
+		resetThrottleUI();
+
+		loadConfig();
+		loadSafety();
 		loadTestMetadata();
-        fetchStatus();
+
+		startPolling();
+	};
+
+	function startPolling() {
+		updateLiveStatus();
 		fetchSystemState();
-    };
+	}
 </script>
 
 

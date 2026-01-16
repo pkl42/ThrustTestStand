@@ -94,7 +94,8 @@ void WebServerController::setupRoutes()
         char buf[768];
         test_data_t d = thrustStand->getCurrentDataSet();
         TestStatus_t ts = testController->getStatus();
-        test_data_accu_t c=thrustStand->getCumDataSet();
+        test_data_accu_t c=thrustStand->getAccuDataSet();
+        ThrustStandSafety s = thrustStand->getStandSafety();
 
 snprintf(buf, sizeof(buf),
         "{"
@@ -109,13 +110,15 @@ snprintf(buf, sizeof(buf),
              "\"thrust_ratio\":%.2f,"   
             "\"rpm\":%.0f,"
             "\"temperature\":%.2f,"
-            "\"temperature_max\":%.2f,"
             "\"thrust_samples\":%u,"
             "\"torque_samples\":%u,"
             "\"test_running\":%u,"
             "\"test_step\":%u,"
             "\"test_steps_total\":%u,"
-            "\"test_progress\":%.1f"
+            "\"test_progress\":%.1f,"
+            "\"safety_tripped\":%s,"
+            "\"safety_trip_value\":%.2f,"
+            "\"safety_trip_reason\":\"%s\""
         "}",
         d.throttle,
         d.thrust,
@@ -124,17 +127,19 @@ snprintf(buf, sizeof(buf),
         d.torque_cell_2,
         d.voltage,
         d.current,
-        d.power,
-        d.thrust_ratio,
+        d.voltage * d.current,
+        d.thrust/(d.voltage * d.current),
         d.rpm,
         d.temperature,
-        d.temperature_max,
-        c.samples.thrust,
-        c.samples.torque,
+        c.thrust.mean,
+        c.torque.mean,
         ts.running ? 1 : 0,
         ts.step,
         ts.total_steps,
-        ts.progress
+        ts.progress,
+        s.state.tripped ? "true" : "false",
+        s.state.tripValue,
+        thrustStand->safetyTripReasonToString(s.state.reason)
     );
 
         request->send(200, "application/json", buf); });
@@ -159,11 +164,6 @@ snprintf(buf, sizeof(buf),
                   response->printf(
                       "\"thrust_cal\": %.4f,",
                       thrustStand->getThrustCalFactor());
-
-                  /* -------- MaxThrust --------- */
-                  response->printf(
-                      "\"thrust_max\": %.0f",
-                      thrustStand->getMaxThrottlePercent());
 
                   /* ---------- Torque ---------- */
                   auto torqueCal =
@@ -230,6 +230,61 @@ snprintf(buf, sizeof(buf),
                   request->send(response);
               });
 
+    // Safety
+
+    server.on("/api/safety", HTTP_GET,
+              [this](AsyncWebServerRequest *request)
+              {
+                  const ThrustStandSafety &safety = thrustStand->getStandSafety();
+                  const ThrustStandLimits &limits = safety.limits;
+                  const ThrustStandSafetyState &state = safety.state;
+
+                  AsyncResponseStream *response =
+                      request->beginResponseStream("application/json");
+
+                  response->print("{");
+
+                  /* ---------- Limits ---------- */
+                  response->printf(
+                      "\"throttle_limit_percent\":%.2f,",
+                      limits.maxThrottlePercent);
+
+                  response->printf(
+                      "\"current_limit_a\":%.2f,",
+                      limits.maxCurrentA);
+
+                  response->printf(
+                      "\"voltage_limit_v\":%.2f,",
+                      limits.maxVoltageV);
+
+                  response->printf(
+                      "\"thrust_limit_gf\":%.2f,",
+                      limits.maxThrustGF);
+
+                  /* ---------- Safety State ---------- */
+                  response->printf(
+                      "\"tripped\":%s,",
+                      state.tripped ? "true" : "false");
+
+                  response->printf(
+                      "\"trip_value\":%.2f,",
+                      state.tripValue);
+
+                  response->printf(
+                      "\"trip_reason\":\"%s\"",
+                      thrustStand->safetyTripReasonToString(state.reason));
+
+                  response->print("}");
+
+                  request->send(response);
+              });
+
+    // Safety clear
+    server.on("/api/safety/clear", HTTP_POST, [this](AsyncWebServerRequest *request)
+              {
+    thrustStand->clearSafetyTrip();
+    request->send(200, "text/plain", "OK"); });
+
     // Config Section
     server.on("/config", HTTP_POST,
               [this](AsyncWebServerRequest *request)
@@ -251,7 +306,8 @@ snprintf(buf, sizeof(buf),
                       ESP_LOGI("setupRoutes",
                                "setMaxThrottlePercent: max=%.0f",
                                max);
-                      thrustStand->setMaxThrottlePercent(max);
+                      thrustStand->setThrottleLimitPercent(max);
+
                       handled = true;
                   }
 
@@ -373,19 +429,42 @@ snprintf(buf, sizeof(buf),
     } });
 
     // CSV Download
-    server.on("/downloadCSV", HTTP_GET, [](AsyncWebServerRequest *request)
+    server.on("/api/export/csv/mean", HTTP_GET, [](AsyncWebServerRequest *request)
               {
-        if (LittleFS.exists("/last_test.csv")) {
+        if (LittleFS.exists("/last_test_mean.csv")) {
             AsyncWebServerResponse *response = request->beginResponse(LittleFS,
-                 "/last_test.csv", "text/csv");
+                 "/last_test_mean.csv", "text/csv");
             response->addHeader(
                 "Content-Disposition",
-                "attachment; filename=\"thrustTest.csv\""
+                "attachment; filename=\"thrustTest_mean.csv\""
             );
              request->send(response);
         } else {
             request->send(404, "text/plain", "CSV file not found");
         } });
+
+    server.on("/api/export/csv/statistics", HTTP_GET,
+              [](AsyncWebServerRequest *request)
+              {
+                  if (LittleFS.exists("/last_test_stats.csv"))
+                  {
+                      AsyncWebServerResponse *response =
+                          request->beginResponse(
+                              LittleFS,
+                              "/last_test_stats.csv",
+                              "text/csv");
+
+                      response->addHeader(
+                          "Content-Disposition",
+                          "attachment; filename=\"thrustTest_stats.csv\"");
+
+                      request->send(response);
+                  }
+                  else
+                  {
+                      request->send(404, "text/plain", "Statistics CSV file not found");
+                  }
+              });
 
     // Set Throttle
     server.on("/setThrottle", HTTP_POST, [this](AsyncWebServerRequest *request)

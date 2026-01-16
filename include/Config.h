@@ -3,7 +3,7 @@
 #include <IPAddress.h>
 
 #define THRUSTSTAND_APP_NAME "Motor Thrust Test Stand"
-#define THRUSTSTAND_APP_VERSION "v1.4.0"
+#define THRUSTSTAND_APP_VERSION "v1.5.0"
 #define THRUSTSTAND_CSV_VERSION "1.1"
 
 // #define THRUSTSTAND_GIT_HASH        "a9c4e2f"
@@ -41,7 +41,7 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
    |  39  | IO |     |     |           |
    |  40  | IO |     |     |           |
    |  41  | IO |     |     | I2C_SCL   |
-   |  42  | IO |     |     | I2C_SDA   |
+   |  42  | IO |     |     | I2C_SDA   | CAGE_SWITCH_PIN
    |  43  | IO |     |     | UART_TX0  |
    |  44  | IO |     |     | UART_RX0  |
    |  45* | IO |     |     |           |
@@ -69,8 +69,8 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
 // #define RGB_BUILTIN 48
 // #define HAS_RGB_LED 1
 // #endif
-#define RGB_BUILTIN 48
-#define RGB_BUILTIN_LED 48
+
+#define RGB_BUILTIN_LED 38
 #define HAS_RGB_LED 1
 
 #define HX711_DOUT_1_PIN 4 // mcu > HX711 no 1 dout pin 5kg
@@ -93,6 +93,8 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
 #define MAX31855_CS_PIN 17
 
 #define ESTOP_PIN 47
+
+#define CAGE_SWITCH_PIN 42
 
 // microsecond delay after writing sck pin high or low. This delay could be required for faster mcu's.
 // So far the only mcu reported to need this delay is the ESP32 (issue #35), both the Arduino Due and ESP8266 seems to run fine without it.
