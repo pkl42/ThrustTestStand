@@ -1,0 +1,40 @@
+{
+  "id": "throttle_sweep_0_100_5pct",
+  "name": "Throttle Sweep 0–100% (5% steps)",
+  "version": "1.0",
+
+  "limits": {
+    "maxCurrentA": 60,
+    "maxTempC": 90,
+    "maxDurationS": 900
+  },
+
+  "motion": {
+    "smooth": true,
+    "accelTimeMs": 1000,
+    "decelTimeMs": 1000,
+	"settleTimeMs": 200
+  },
+
+  "measurement": {
+    "enabled": true,
+    "completion": "onStop",
+    "intervalS": 60,
+    "windowMs": 2000
+  },
+
+  "steps": [
+    { "type": "set", "throttle": 0, "dwellS": 2, "measure": { "enabled": false} },
+
+    { "type": "stepSweep",
+      "from": 0,
+      "to": 100,
+      "step": 5,
+      "dwellS": 2.0,
+      "motion": { "smooth": true, "accelTimeMs": 1000, "decelTimeMs": 1000, "settleTimeMs": 200  },
+      "measure": { "enabled": true, "completion": "onStop"}
+    },
+
+    { "type": "set", "throttle": 0, "dwellS": 2, "measure": { "enabled": false } }
+  ]
+}

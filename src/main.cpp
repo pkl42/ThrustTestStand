@@ -1,17 +1,27 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Peter Ludwig
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #include <Arduino.h>
 #include <esp_log.h>
 #include <pgmspace.h>
 #include <freertos/semphr.h>
-#include "Config.h"
-#include "ThrustStand.h"
-#include "ThrustTestController.h"
-#include "WebServerController.h"
-#include "WiFiAPController.h"
+#include "core/Config.h"
+#include "core/ThrustStand.h"
+#include "protocol/TestProtocolExecutor.h"
+#include "protocol/ProtocolManager.h"
+#include "recorder/TestDataRecorder.h"
+#include "comms/WebServerController.h"
+#include "comms/WiFiAPController.h"
 
 #define SERIAL_SPEED 115200
 
 ThrustStand thrustStand;
-ThrustTestController testController(thrustStand); // Use default timing
+TestDataRecorder dataRecorder(thrustStand);
+ProtocolManager protocolManager;
+TestProtocolExecutor testExecutor(thrustStand);
 
 WiFiAPController wifiAP(AP_SSID, AP_PASSWORD);
 
@@ -42,10 +52,13 @@ void setup()
     ESP_LOGE("setup", "thrust stand initializing failed!");
     delay(1000);
   };
-  // initialize Test Controller
-  testController.begin();
 
-  webServer = new WebServerController(&thrustStand, &testController);
+  dataRecorder.begin();
+  // initialize Test Executor
+  testExecutor.begin();
+  testExecutor.setRecorder(&dataRecorder);
+
+  webServer = new WebServerController(&thrustStand, &testExecutor, &dataRecorder, &protocolManager);
 
   // Mutex für shared data
   dataMutex = xSemaphoreCreateMutex();
@@ -94,10 +107,8 @@ void thrustStandTask(void *parameter)
     thrustStand.update();
 
     // 2️⃣ Run thrust test state machine (ONLY here!)
-    if (testController.isTestRunning())
-    {
-      testController.runTest();
-    }
+    testExecutor.update();
+    dataRecorder.update();
 
     // 3️⃣ Protect shared data only if actually accessed
     if (dataMutex != nullptr)

@@ -1,0 +1,402 @@
+
+:root {
+    --bg-main: #0f1114;
+    --bg-panel: #181b20;
+    --bg-panel-2: #1f232a;
+    --border: #2a2f38;
+
+    --text-main: #e6e6e6;
+    --text-dim: #9aa0a6;
+
+    --accent: #d32f2f;
+    --accent-glow: rgba(211, 47, 47, 0.4);
+
+    --ok: #4caf50;
+    --warn: #ff9800;
+    --err: #f44336;
+	
+    /* Inputs & Buttons */
+    --input-bg: #1f232a;
+    --input-text: #e6e6e6;
+    --input-border: var(--border);
+
+    --button-bg: #2a2f38;
+    --button-text: #e6e6e6;
+
+    /* Panel text / labels */
+    --label-color: var(--text-dim);	
+}
+
+:root[data-theme="dark"] {
+    --bg-main: #0f1114;
+    --bg-panel: #181b20;
+    --bg-panel-2: #1f232a;
+    --border: #2a2f38;
+
+    --text-main: #e6e6e6;
+    --text-dim: #9aa0a6;
+
+    --input-bg: #1f232a;
+    --input-text: #e6e6e6;
+    --input-border: #2a2f38;
+
+    --button-bg: #2a2f38;
+    --button-text: #e6e6e6;
+}
+
+:root[data-theme="light"] {
+    --bg-main: #f2f2f2;
+    --bg-panel: #ffffff;
+    --bg-panel-2: #f7f7f7;
+    --border: #ccc;
+
+    --text-main: #111;
+    --text-dim: #555;
+
+    --input-bg: #fff;
+    --input-text: #111;
+    --input-border: #bbb;
+
+    --button-bg: #ddd;
+    --button-text: #111;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 20px;
+    background: var(--bg-main);
+    color: var(--text-main);
+    font-family: "Segoe UI", system-ui, sans-serif;
+	line-height: 1.4;
+}
+
+section {
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-panel-2));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-bottom: 25px;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.03),
+        0 10px 25px rgba(0,0,0,0.4);
+}
+
+/* ---------- Headings ---------- */
+
+h1 {
+    margin-bottom: 25px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+h2 {
+    margin: 0 0 15px 0;
+    font-size: 1.1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+}
+
+/* ---------------------------
+   Inputs, Selects, Textareas
+----------------------------*/
+input, select, textarea {
+    background-color: var(--input-bg);
+    color: var(--input-text);
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 0.95em;
+    transition: background 0.2s, color 0.2s, border 0.2s;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 4px var(--accent-glow);
+}
+
+label {
+    color: var(--label-color);
+    font-weight: 500;
+}
+
+/* ------------ Buttons -----------*/
+button {
+    background-color: var(--button-bg);
+    color: var(--button-text);
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border 0.2s;
+}
+
+button:hover {
+    background-color: var(--accent);
+    color: #fff;
+}
+
+button:active {
+    background-color: var(--accent-glow);
+	color: #fff; /* keep readable */
+}
+
+button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.button-group {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.button-group button {
+    width: 100%;
+}
+
+
+/* ------- HR --------------*/
+hr {
+	grid-column: 1 / -1;
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 10px 0;
+}
+
+
+/* -------- Grid / Layout Helpers-----*/
+.three-col {
+    display: grid;
+    grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr) minmax(240px, 1fr);
+    gap: 22px;
+    row-gap: 12px;
+}
+
+@media (max-width: 1200px) {
+    .three-col {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Safety banner styles */
+.safety-banner {
+    background-color: #b71c1c; /* dark red */
+    color: #fff;
+    font-weight: bold;
+    padding: 12px;
+    text-align: center;
+    border-radius: 6px;
+    display: none; /* hidden by default */
+    animation: flashRed 1s infinite alternate;
+}
+
+@keyframes flashRed {
+    0% { background-color: #b71c1c; }
+    100% { background-color: #f44336; }
+}
+
+
+/* ---------- Fields ---------- */
+
+.field {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+	margin-bottom: 8px;
+}
+
+.field label {
+    min-width: 140px;
+    color: var(--text-dim);
+}
+
+
+/* ---------- Range Input ---------- */
+input[type=range] {
+    flex: 1;
+    appearance: none;
+    height: 6px;
+    background: #333;
+    border-radius: 6px;
+	accent-color: var(--accent);
+}
+
+input[type=range]::-webkit-slider-thumb {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 12px var(--accent-glow);
+    cursor: pointer;
+}
+
+
+input[type=text],
+input[type=number] {
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--input-text);
+    padding: 6px 8px;
+    border-radius: 6px;
+}
+
+/* ---------- Progress ---------- */
+
+.progress-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+progress {
+    width: 100%;
+    height: 16px;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+progress::-webkit-progress-bar {
+    background-color: var(--bg-panel-2);
+    border-radius: 6px;
+}
+
+progress::-webkit-progress-value {
+    background: linear-gradient(
+        90deg,
+        var(--accent),
+        #ff5252
+    );
+	border-radius: 6px;
+    box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.test-idle {
+    opacity: 0.35;
+}
+
+
+/* ------ Sensor / Actor States ----------*/
+
+.state {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+	display: inline-block;
+	text-align: center;
+	min-width: 80px;
+    text-transform: uppercase;
+}
+
+.state-uninit { background: #ccc; color: #333; }
+.state-init { background: #2196f3; color: #fff; }
+.state-ready { background: var(--ok); color: #fff; }
+.state-error { background: var(--err); color: #fff; }
+.state-disabled { background: #9e9e9e; color: #fff; }
+
+.state-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    row-gap: 10px;
+    column-gap: 20px;
+    align-items: center;
+}
+
+
+.setup-group {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    grid-auto-flow: row;
+    gap: 10px 12px;
+    padding: 10px;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+}
+
+.setup-title {
+    grid-column: 1 / -1;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 4px;
+}
+
+.setup-row {
+    display: contents;
+}
+
+.setup-row-3 {
+    display: grid;
+    grid-template-columns: 220px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+/* -------- Protocol Repository -------- */
+
+.protocol-list {
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px;
+    margin-bottom: 10px;
+}
+
+.protocol-entry {
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    margin-bottom: 6px;
+    transition: background 0.15s, border 0.15s;
+}
+
+.protocol-entry:hover {
+    background: rgba(255,255,255,0.05);
+}
+
+.protocol-entry.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
+    background: rgba(211, 47, 47, 0.08);
+}
+
+.protocol-name {
+    font-weight: 600;
+}
+
+.protocol-meta {
+    font-size: 0.8em;
+    color: var(--text-dim);
+}
+
+/* Read-only JSON viewer */
+.code-view {
+    max-height: 320px;
+    overflow: auto;
+    background: #0c0e11;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 0.8em;
+    white-space: pre;
+    color: #e0e0e0;
+}
+
+.small-text {
+    font-size: 0.85em;
+    color: var(--text-dim);
+}
+
