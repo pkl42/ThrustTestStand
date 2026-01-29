@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/TestProtocol.schema.json",
+  "title": "Motor Thrust Test Protocol",
+  "type": "object",
+  "required": ["id", "name", "version", "steps"],
+
+  "properties": {
+    "id": {
+      "type": "string",
+      "maxLength": 63
+    },
+
+    "name": {
+      "type": "string",
+      "maxLength": 63
+    },
+
+    "version": {
+      "type": "string",
+      "maxLength": 15
+    },
+
+    "limits": {
+      "$ref": "#/$defs/ProtocolLimits"
+    },
+
+    "motion": {
+      "$ref": "#/$defs/MotionConfig"
+    },
+
+    "measurement": {
+      "$ref": "#/$defs/MeasurementConfig"
+    },
+
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/TestStep"
+      }
+    }
+  },
+
+  "$defs": {
+    "ProtocolLimits": {
+      "type": "object",
+      "properties": {
+        "maxCurrentA": { "type": "number", "minimum": 0 },
+        "maxTempC": { "type": "number", "minimum": 0 },
+        "maxDurationS": { "type": "integer", "minimum": 0 },
+        "maxVoltageV": { "type": "number", "minimum": 0 },
+        "minVoltageV": { "type": "number", "minimum": 0 },
+        "maxThrustGF": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+
+    "MotionConfig": {
+      "type": "object",
+      "properties": {
+        "smooth": { "type": "boolean" },
+        "accelTimeMs": { "type": "integer", "minimum": 0 },
+        "decelTimeMs": { "type": "integer", "minimum": 0 },
+        "settleTimeMs": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+
+    "MeasurementConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+
+        "completion": {
+          "type": "string",
+          "enum": ["fixedDuration", "periodic", "onStop"]
+        },
+
+        "intervalS": {
+          "type": "integer",
+          "minimum": 0
+        },
+
+        "windowMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "TestStep": {
+      "type": "object",
+      "required": ["type"],
+
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["set", "hold", "ramp", "stepSweep"]
+        },
+
+        "throttleFrom": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+
+        "throttleTo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+
+        "rampRatePctPerS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+
+        "stepPct": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+
+        "dwellMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+
+        "motion": {
+          "$ref": "#/$defs/MotionConfig"
+        },
+
+        "measurement": {
+          "$ref": "#/$defs/MeasurementConfig"
+        }
+      },
+
+      "additionalProperties": false,
+
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "ramp" } }
+          },
+          "then": {
+            "required": ["throttleFrom", "throttleTo", "rampRatePctPerS"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "stepSweep" } }
+          },
+          "then": {
+            "required": ["throttleFrom", "throttleTo", "stepPct", "dwellMs"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "enum": ["set", "hold"] } }
+          },
+          "then": {
+            "required": ["throttleTo"]
+          }
+        }
+      ]
+    }
+  }
+}

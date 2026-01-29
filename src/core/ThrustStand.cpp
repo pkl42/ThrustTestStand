@@ -66,6 +66,7 @@ bool ThrustStand::armMotor()
 
     if (isSafeToArm())
     {
+        _state.idleTimeMs = millis();
         armFlag = _motor.arm(); // Arm the ESC
     }
     else
