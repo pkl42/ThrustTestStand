@@ -18,7 +18,7 @@
 struct ProtocolExecStatus;
 class ThrustStand;
 
-static constexpr uint32_t MAX_RECORD_STEPS = 96;
+static constexpr uint32_t MAX_RECORD_STEPS = 192;
 static constexpr uint16_t INVALID_REC_INDEX = std::numeric_limits<uint16_t>::max();
 
 /**

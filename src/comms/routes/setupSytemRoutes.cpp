@@ -8,6 +8,7 @@
 
 void WebServerController::setupSystemRoutes()
 {
+
     //
     // ── GET /api/system
     //
@@ -33,7 +34,7 @@ void WebServerController::setupSystemRoutes()
               {
                   StaticJsonDocument<256> doc;
 
-                  bool success = _thrustStand->init_sensors(); // only sensors
+                  bool success = _thrustStand->init_sensors(true); // only sensors
                   doc["success"] = success;
                   doc["message"] = success ? "Sensors initialized successfully" : "Sensor initialization failed";
 

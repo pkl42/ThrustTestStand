@@ -64,6 +64,8 @@ public:
      */
     uint32_t getPulseCount(bool resetCounter = true);
 
+    void reset(bool detachIrq);
+
 private:
     /* ========= ISR ========= */
 

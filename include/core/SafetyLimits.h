@@ -8,6 +8,39 @@
 #ifndef SAFETY_LIMITS_H
 #define SAFETY_LIMITS_H
 
+enum class BatteryPreset : uint8_t
+{
+    BATTERY_PRESET_NONE = 0,
+    BATTERY_PRESET_3S = 3,
+    BATTERY_PRESET_4S = 4,
+    BATTERY_PRESET_5S = 5,
+    BATTERY_PRESET_6S = 6,
+};
+
+/**
+ * @brief Convert battery preset to human-readable label.
+ *
+ * @return Constant string, never null.
+ */
+inline const char *batteryPresetToString(BatteryPreset preset)
+{
+    switch (preset)
+    {
+    case BatteryPreset::BATTERY_PRESET_NONE:
+        return "None / Calibration";
+    case BatteryPreset::BATTERY_PRESET_3S:
+        return "3S LiPo";
+    case BatteryPreset::BATTERY_PRESET_4S:
+        return "4S LiPo";
+    case BatteryPreset::BATTERY_PRESET_5S:
+        return "5S LiPo";
+    case BatteryPreset::BATTERY_PRESET_6S:
+        return "6S LiPo";
+    default:
+        return "Unknown Battery";
+    }
+}
+
 /**
  * @brief Aggregated safety and operational limits of the thrust stand.
  *
@@ -26,10 +59,23 @@ typedef struct
     float maxCurrentA = CURRENT_SENSOR_MAX;         ///< Maximum allowed motor current [A]
     float maxThrottlePercent = 100.f;               ///< Maximum allowed throttle [%]
     float maxVoltageV = VOLTAGE_SENSOR_MAX;         ///< Maximum allowed supply voltage [V]
-    float minVoltageV = -1.f;                       ///< Minimum allowed supply voltage [V]
+    float minVoltageV = 0.f;                        ///< Minimum allowed supply voltage [V]
     float maxThrustGF = THRUST_SENSOR_MAX;          ///< Maximum allowed thrust [gf]
     float maxTemperatureC = TEMPERATURE_SENSOR_MAX; ///< Maximum allowed Motor Temperature [°C]
+    BatteryPreset batteryPreset = BatteryPreset::BATTERY_PRESET_NONE;
 } SafetyLimits;
+
+constexpr inline BatteryPreset cellsToPreset(uint8_t cells)
+{
+    return (cells >= 2 && cells <= 6)
+               ? static_cast<BatteryPreset>(cells)
+               : BatteryPreset::BATTERY_PRESET_NONE;
+}
+
+constexpr inline uint8_t batteryPresetToCells(BatteryPreset preset)
+{
+    return static_cast<uint8_t>(preset);
+}
 
 /**
  * @brief Identifies the primary cause of a safety trip condition.

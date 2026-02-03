@@ -28,10 +28,113 @@ ThrustStand::ThrustStand()
       _currentSensor(),
       _voltageSensor(),
       _hwEstop(ESTOP_PIN),
-      _motor(MOTOR_ESC_PIN, 50, 13, 1)
+      _pwmDriver(new PwmEscDriver(MOTOR_ESC_PIN, 50, 13, 1)),
+      _motor(_pwmDriver) // pass driver directly
 
 {
     // other members can be initialized here
+    _escDriverType = EscDriverType::ESC_DRIVER_PWM;
+}
+
+ThrustStand::~ThrustStand()
+{
+    _motor.stop(); // ensure motor is stopped
+    delete _pwmDriver;
+    delete _dshotDriver;
+}
+
+bool ThrustStand::switchDriver(EscDriverType type)
+{
+    // No-op if already active
+    if (_escDriverType == type)
+        return true;
+
+    // Always stop motor before switching signal protocol
+    _motor.stop();
+
+    EscSignalDriver *newDriver = nullptr;
+
+    switch (type)
+    {
+    case EscDriverType::ESC_DRIVER_PWM:
+    {
+        if (!_pwmDriver)
+        {
+            _pwmDriver = new PwmEscDriver(
+                MOTOR_ESC_PIN,
+                50, // Hz
+                13, // resolution
+                1   // LEDC channel
+            );
+        }
+
+        newDriver = _pwmDriver;
+        break;
+    }
+
+    case EscDriverType::ESC_DRIVER_DSHOT150:
+    case EscDriverType::ESC_DRIVER_DSHOT300:
+    case EscDriverType::ESC_DRIVER_DSHOT600:
+    {
+        if (!_dshotDriver)
+        {
+            _dshotDriver = new DShotEscDriver(
+                MOTOR_ESC_PIN,
+                DShotEscDriver::DShotRate::DSHOT300 // temporary default
+            );
+        }
+
+        // Map EscDriverType → DShotRate
+        DShotEscDriver::DShotRate rate;
+        switch (type)
+        {
+        case EscDriverType::ESC_DRIVER_DSHOT150:
+            rate = DShotEscDriver::DShotRate::DSHOT150;
+            break;
+        case EscDriverType::ESC_DRIVER_DSHOT600:
+            rate = DShotEscDriver::DShotRate::DSHOT600;
+            break;
+        case EscDriverType::ESC_DRIVER_DSHOT300:
+        default:
+            rate = DShotEscDriver::DShotRate::DSHOT300;
+            break;
+        }
+
+        if (!_dshotDriver->setRate(rate))
+        {
+            ESP_LOGE(TAG, "Failed to set DShot rate");
+            return false;
+        }
+
+        newDriver = _dshotDriver;
+        break;
+    }
+
+    case EscDriverType::ESC_DRIVER_NONE:
+    default:
+        ESP_LOGW(TAG, "ESC driver NONE selected");
+        _escDriverType = EscDriverType::ESC_DRIVER_NONE;
+        return true;
+    }
+
+    if (!newDriver)
+        return false;
+
+    // Bind new driver to MotorESC
+    _motor.setDriver(newDriver);
+
+    // Initialize hardware for new protocol
+    if (!_motor.begin())
+    {
+        ESP_LOGE(TAG, "MotorESC begin() failed after driver switch");
+        return false;
+    }
+
+    _escDriverType = type;
+    saveConfig();
+
+    ESP_LOGI(TAG, "ESC driver switched to %s", escDriverToString(type));
+    return true;
 }
 
 bool ThrustStand::init()
@@ -48,11 +151,18 @@ bool ThrustStand::init()
         return false;
     }
 
+    if (!switchDriver(_escDriverType))
+    {
+
+        return false;
+    }
+
     if (!_motor.begin())
     {
 
         return false;
     };
+
     _hwEstop.attachActuator(&_motor);
     _hwEstop.begin(); // attach interrupts, ready to stop motor
 
@@ -82,10 +192,19 @@ bool ThrustStand::disarmMotor()
     return _motor.disarm(); // Disarm the ESC
 }
 
-bool ThrustStand::init_sensors()
+bool ThrustStand::init_sensors(bool force)
 {
     bool initialize = true;
-    ESP_LOGI(TAG, "Initializing Sensors ...");
+    ESP_LOGI(TAG, "Initializing Sensors%s ...",
+             force ? " (forced)" : "");
+
+    // pre-check, thrust stand is in idle mode
+
+    if ((_state.controlMode == ThrottleControlMode::AUTOMATIC) || (_motor.getCurrentThrottle() > 0.f))
+    {
+        ESP_LOGW(TAG, "Initializing Sensors not allowed as system is not idle.");
+        return false;
+    }
 
     if (THRUST_SENSOR_INSTALLED && (_thrustSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
     {
@@ -137,7 +256,7 @@ bool ThrustStand::init_sensors()
         }
     }
 
-    if (RPM_SENSOR_INSTALLED && (_rpmSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
+    if (RPM_SENSOR_INSTALLED && ((_rpmSensor.getState() == SensorState::SENSOR_UNINITIALIZED || force)))
     {
         RpmSensorConfig rpm_config;
         if (!_rpmSensor.begin(RPM_SENSOR_PIN, rpm_config))
@@ -420,6 +539,22 @@ void ThrustStand::setThrottleLimitPercent(float percent, SafetyTripSource source
         {
             _safety.testLimits.maxThrottlePercent = percent;
         }
+    }
+}
+
+void ThrustStand::setBatteryPreset(BatteryPreset preset,
+                                   SafetyTripSource source)
+{
+    if (source == SafetyTripSource::CORE_LIMIT)
+    {
+        _safety.coreLimits.batteryPreset = preset;
+        saveConfig();
+    }
+    // not sure if it make sense to purely set the battery preset on TEST_LIMIT
+    // but for keeping it aligned with the other limit settings
+    if (source == SafetyTripSource::TEST_LIMIT)
+    {
+        _safety.testLimits.batteryPreset = preset;
     }
 }
 
@@ -807,6 +942,10 @@ void ThrustStand::loadConfig()
         prefs.putUInt("autoDisarmMs", _autoDisarmMs);
     _autoDisarmMs = prefs.getUInt("autoDisarmMs");
 
+    if (!prefs.isKey("escDriverType"))
+        prefs.putUInt("escDriverType", static_cast<uint8_t>(_escDriverType));
+    _escDriverType = static_cast<EscDriverType>(prefs.getUInt("escDriverType"));
+
     /* ---------- Safety ---------- */
     if (!prefs.isKey("maxCurrentA"))
         prefs.putFloat("maxCurrentA", CURRENT_SENSOR_MAX);
@@ -825,8 +964,15 @@ void ThrustStand::loadConfig()
     _safety.coreLimits.maxVoltageV = prefs.getFloat("maxVoltageV");
 
     if (!prefs.isKey("minVoltageV"))
-        prefs.putFloat("minVoltageV", -1.f);
+        prefs.putFloat("minVoltageV", 0.f);
     _safety.coreLimits.minVoltageV = prefs.getFloat("minVoltageV");
+
+    if (!prefs.isKey("batteryPreset"))
+    {
+        prefs.putUInt("batteryPreset", batteryPresetToCells(BatteryPreset::BATTERY_PRESET_NONE));
+    }
+    uint8_t batteryPreset = prefs.getUInt("batteryPreset");
+    _safety.coreLimits.batteryPreset = cellsToPreset(batteryPreset);
 
     prefs.end();
 }
@@ -866,6 +1012,8 @@ void ThrustStand::saveConfig()
     prefs.putUInt("minPulseUs", _motor.getMinPulseUs());
     prefs.putUInt("maxPulseUs", _motor.getMaxPulseUs());
 
+    prefs.putUInt("escDriverType", static_cast<uint8_t>(_escDriverType));
+
     /* ---------Security Limits ---------- */
     prefs.putFloat("maxCurrentA", _safety.coreLimits.maxCurrentA);
     prefs.putFloat("maxThrustGF", _safety.coreLimits.maxThrustGF);
@@ -875,6 +1023,8 @@ void ThrustStand::saveConfig()
     prefs.putFloat("maxTempC", _safety.coreLimits.maxTemperatureC);
 
     prefs.putUInt("autoDisarmMs", _autoDisarmMs);
+
+    prefs.putUInt("batteryPreset", batteryPresetToCells(_safety.coreLimits.batteryPreset));
 
     prefs.end();
 }
@@ -1079,10 +1229,11 @@ void ThrustStand::fillCalibrationJson(JsonDocument &doc)
     doc["current"]["sensitivity"] = getCurrentSensitivity();
     doc["voltage"]["calibration"] = getVoltageCalibrationFactor();
 
-    doc["motor_pwm"]["min_us"] = getMinPulseUs();
-    doc["motor_pwm"]["max_us"] = getMaxPulseUs();
+    doc["motor"]["pwm_min_us"] = getMinPulseUs();
+    doc["motor"]["pwm_max_us"] = getMaxPulseUs();
     //
-    doc["manual_idle_disarm_timeout_s"] = _autoDisarmMs / 1000UL;
+    doc["motor"]["disarm_timeout_s"] = _autoDisarmMs / 1000UL;
+    doc["motor"]["esc_driver_type"] = static_cast<uint8_t>(_escDriverType);
 }
 
 void ThrustStand::fillSystemStateJson(JsonDocument &doc) const
@@ -1137,4 +1288,92 @@ void ThrustStand::fillSafetyJson(JsonDocument &doc) const
     doc["limits"]["voltage_max_v"] = _safety.coreLimits.maxVoltageV;
     doc["limits"]["voltage_min_v"] = _safety.coreLimits.minVoltageV;
     doc["limits"]["thrust_gf"] = _safety.coreLimits.maxThrustGF;
+    doc["limits"]["battery_cells"] = batteryPresetToCells(_safety.coreLimits.batteryPreset);
+}
+
+void ThrustStand::fillBatteryPresetJson(JsonDocument &doc) const
+{
+    JsonArray arr = doc.createNestedArray("presets");
+
+    auto addPreset = [&](BatteryPreset preset,
+                         const char *label,
+                         float minV,
+                         float maxV)
+    {
+        JsonObject obj = arr.createNestedObject();
+        const uint8_t cells = static_cast<uint8_t>(preset);
+
+        obj["id"] = cells;
+        obj["label"] = label;
+        obj["cells"] = cells;
+        obj["voltage_min_v"] = minV;
+        obj["voltage_max_v"] = maxV;
+    };
+
+    /* ---------- NONE / Calibration ---------- */
+    addPreset(
+        BatteryPreset::BATTERY_PRESET_NONE,
+        batteryPresetToString(BatteryPreset::BATTERY_PRESET_NONE),
+        -0.01f, // Slightly below zero to avoid noise-triggered trips when disabled
+        VOLTAGE_SENSOR_MAX);
+
+    /* ---------- LiPo presets ---------- */
+    addPreset(
+        BatteryPreset::BATTERY_PRESET_3S,
+        batteryPresetToString(BatteryPreset::BATTERY_PRESET_3S),
+        3 * 3.2f,
+        3 * 4.2f);
+
+    addPreset(
+        BatteryPreset::BATTERY_PRESET_4S,
+        batteryPresetToString(BatteryPreset::BATTERY_PRESET_4S),
+        4 * 3.2f,
+        4 * 4.2f);
+
+    addPreset(
+        BatteryPreset::BATTERY_PRESET_5S,
+        batteryPresetToString(BatteryPreset::BATTERY_PRESET_5S),
+        5 * 3.2f,
+        5 * 4.2f);
+
+    addPreset(
+        BatteryPreset::BATTERY_PRESET_6S,
+        batteryPresetToString(BatteryPreset::BATTERY_PRESET_6S),
+        6 * 3.2f,
+        6 * 4.2f);
+}
+
+void ThrustStand::fillESCDriverJson(JsonDocument &doc) const
+{
+    JsonArray arr = doc.createNestedArray("esc_drivers");
+
+    auto addDriver = [&](EscDriverType type, const char *label)
+    {
+        JsonObject obj = arr.createNestedObject();
+        obj["id"] = static_cast<uint8_t>(type);
+        obj["label"] = label;
+    };
+
+    // ---------- NONE ----------
+    addDriver(EscDriverType::ESC_DRIVER_NONE,
+              escDriverToString(EscDriverType::ESC_DRIVER_NONE));
+
+    // ---------- PWM ----------
+    addDriver(EscDriverType::ESC_DRIVER_PWM,
+              escDriverToString(EscDriverType::ESC_DRIVER_PWM));
+
+    // ---------- D-Shot variants ----------
+    addDriver(EscDriverType::ESC_DRIVER_DSHOT150,
+              escDriverToString(EscDriverType::ESC_DRIVER_DSHOT150));
+
+    addDriver(EscDriverType::ESC_DRIVER_DSHOT300,
+              escDriverToString(EscDriverType::ESC_DRIVER_DSHOT300));
+
+    addDriver(EscDriverType::ESC_DRIVER_DSHOT600,
+              escDriverToString(EscDriverType::ESC_DRIVER_DSHOT600));
+}
+
+void ThrustStand::updateEsc()
+{
+    _motor.updateEsc();
 }

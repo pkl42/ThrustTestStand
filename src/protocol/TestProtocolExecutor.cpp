@@ -73,6 +73,8 @@ bool TestProtocolExecutor::setRunContext(const String &motor,
                                          const String &prop,
                                          const String &protocolID,
                                          const String &protocolVersion,
+                                         const BatteryPreset batteryCells,
+                                         const EscDriverType escDriverType,
                                          const char *csvFormat)
 
 {
@@ -87,6 +89,8 @@ bool TestProtocolExecutor::setRunContext(const String &motor,
     _runContext.propellerType = prop;
     _runContext.protocolID = protocolID;
     _runContext.protocolVersion = protocolVersion;
+    _runContext.batteryCells = batteryCells;
+    _runContext.escDriverType = escDriverType;
 
     if (csvFormat && strlen(csvFormat) == 2)
     {

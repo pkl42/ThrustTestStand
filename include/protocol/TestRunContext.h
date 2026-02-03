@@ -7,6 +7,8 @@
 #define TEST_RUN_CONTEXT_H
 
 #include <Arduino.h>
+#include "core/SafetyLimits.h"
+#include "actuators/esc/ESCSignalDriver.h"
 
 /**
  * @brief Metadata describing a test run.
@@ -22,6 +24,8 @@ struct TestRunContext
     String protocolID;      ///< ID of the protocol being executed
                             // String protocolID;      ///< ID of the protocol being executed
     String protocolVersion; ///< Optional version of the protocol
+    BatteryPreset batteryCells = BatteryPreset::BATTERY_PRESET_NONE;
+    EscDriverType escDriverType = EscDriverType::ESC_DRIVER_NONE;
 
     char csvFormat[3] = ".,";
 };

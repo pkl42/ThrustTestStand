@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "comms/WebServerController.h"
+#include "core/SafetyLimits.h"
 #include <ArduinoJson.h>
 
 void WebServerController::setupSafetyRoutes()
@@ -17,6 +18,23 @@ void WebServerController::setupSafetyRoutes()
                 ESP_LOGI("WebServerController", "/api/safety/clear - HTTP_POST");
     _thrustStand->clearSafetyTrip();
     request->send(200, "text/plain", "OK"); });
+
+    //
+    // ── GET /api/safety/battery-presets  --- GET battery preset settings
+    //
+    server.on("/api/safety/battery-presets", HTTP_GET,
+              [this](AsyncWebServerRequest *request)
+              {
+                  ESP_LOGI("WebServerController", "/api/safety/battery-presets - HTTP_GET");
+                  StaticJsonDocument<768> doc;
+                  _thrustStand->fillBatteryPresetJson(doc);
+
+                  AsyncResponseStream *response =
+                      request->beginResponseStream("application/json");
+
+                  serializeJson(doc, *response);
+                  request->send(response);
+              });
 
     //
     // ── GET /api/safety  --- GET current safety settings
@@ -38,57 +56,74 @@ void WebServerController::setupSafetyRoutes()
     //
     // ── POST /api/safety -- post limits
     //
-    server.on("/api/safety", HTTP_POST,
-              [this](AsyncWebServerRequest *request)
-              {
-                  ESP_LOGI("WebServerController", "/api/safety - HTTP_POST");
-                  bool handled = false;
+    server.on(
+        "/api/safety",
+        HTTP_POST,
+        [this](AsyncWebServerRequest *request)
+        {
+            // headers-only handler (unused)
+        },
+        nullptr,
+        [this](AsyncWebServerRequest *request,
+               uint8_t *data,
+               size_t len,
+               size_t index,
+               size_t total)
+        {
+            ESP_LOGI("WebServerController", "/api/safety - HTTP_POST");
+            StaticJsonDocument<512> doc;
+            DeserializationError err = deserializeJson(doc, data, len);
 
-                  if (request->hasParam("limits.voltage_max_v", true))
-                  {
-                      float voltage_max_v = request->getParam("limits.voltage_max_v", true)->value().toFloat();
-                      _thrustStand->setVoltageLimitMaxV(voltage_max_v, SafetyTripSource::CORE_LIMIT);
-                      handled = true;
-                  }
+            if (err)
+            {
+                request->send(400, "text/plain", "Invalid JSON");
+                return;
+            }
 
-                  if (request->hasParam("limits.voltage_min_v", true))
-                  {
-                      float voltage_min_v = request->getParam("limits.voltage_min_v", true)->value().toFloat();
-                      _thrustStand->setVoltageLimitMinV(voltage_min_v, SafetyTripSource::CORE_LIMIT);
-                      handled = true;
-                  }
+            if (!doc.containsKey("limits"))
+            {
+                request->send(400, "text/plain", "Missing limits object");
+                return;
+            }
 
-                  if (request->hasParam("limits.thrust_gf", true))
-                  {
-                      float thrustGF = request->getParam("limits.thrust_gf", true)->value().toFloat();
+            JsonObject limits = doc["limits"];
 
-                      _thrustStand->setThrustLimitGF(thrustGF, SafetyTripSource::CORE_LIMIT);
-                      handled = true;
-                  }
+            // Apply limits (only if present)
+            if (limits.containsKey("voltage_max_v"))
+                _thrustStand->setVoltageLimitMaxV(
+                    limits["voltage_max_v"], SafetyTripSource::CORE_LIMIT);
 
-                  if (request->hasParam("limits.current_a", true))
-                  {
-                      float currentA = request->getParam("limits.current_a", true)->value().toFloat();
+            if (limits.containsKey("voltage_min_v"))
+                _thrustStand->setVoltageLimitMinV(
+                    limits["voltage_min_v"], SafetyTripSource::CORE_LIMIT);
 
-                      _thrustStand->setCurrentLimitA(currentA, SafetyTripSource::CORE_LIMIT);
-                      handled = true;
-                  }
+            if (limits.containsKey("thrust_gf"))
+                _thrustStand->setThrustLimitGF(
+                    limits["thrust_gf"], SafetyTripSource::CORE_LIMIT);
 
-                  if (request->hasParam("limits.throttle_percent", true))
-                  {
-                      float percent = request->getParam("limits.throttle_percent", true)->value().toFloat();
+            if (limits.containsKey("current_a"))
+                _thrustStand->setCurrentLimitA(
+                    limits["current_a"], SafetyTripSource::CORE_LIMIT);
 
-                      _thrustStand->setThrottleLimitPercent(percent, SafetyTripSource::CORE_LIMIT);
-                      handled = true;
-                  }
+            if (limits.containsKey("throttle_percent"))
+                _thrustStand->setThrottleLimitPercent(
+                    limits["throttle_percent"], SafetyTripSource::CORE_LIMIT);
 
-                  if (handled)
-                  {
-                      request->send(200, "text/plain", "OK");
-                  }
-                  else
-                  {
-                      request->send(400, "text/plain", "Missing or invalid parameters");
-                  }
-              });
+            if (limits.containsKey("battery_cells"))
+            {
+
+                uint8_t cells = limits["battery_cells"];
+                BatteryPreset preset = cellsToPreset(cells);
+
+                _thrustStand->setBatteryPreset(
+                    preset,
+                    SafetyTripSource::CORE_LIMIT);
+            }
+            StaticJsonDocument<64> resp;
+            resp["status"] = "ok";
+
+            String out;
+            serializeJson(resp, out);
+            request->send(200, "application/json", out);
+        });
 }

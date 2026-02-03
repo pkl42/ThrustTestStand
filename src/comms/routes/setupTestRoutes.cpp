@@ -70,7 +70,7 @@ void WebServerController::setupTestRoutes()
                 return;
             }
 
-            StaticJsonDocument<512> doc;
+            StaticJsonDocument<1024> doc;
             DeserializationError err = deserializeJson(doc, body);
             if (err)
             {
@@ -78,6 +78,11 @@ void WebServerController::setupTestRoutes()
                               "{\"error\":\"invalid_json\"}");
                 return;
             }
+            //
+            String jsonDump;
+            serializeJson(doc, jsonDump);
+            ESP_LOGI("WebServerController", "Received config JSON: %s", jsonDump.c_str());
+            //
             TestRunContext ctx = _executor->getRunContext();
 
             const char *csvFmt = nullptr;
@@ -90,8 +95,13 @@ void WebServerController::setupTestRoutes()
                 doc["propellerType"] | ctx.propellerType,
                 doc["protocolID"] | ctx.protocolID,
                 doc["protocolVersion"] | ctx.protocolVersion,
+                cellsToPreset(
+                    doc["batteryCells"].as<uint8_t>() |
+                    static_cast<uint8_t>(ctx.batteryCells)),
+                static_cast<EscDriverType>(
+                    doc["escDriverType"].as<uint8_t>() |
+                    static_cast<uint8_t>(ctx.escDriverType)),
                 csvFmt);
-
             if (!ok)
             {
                 request->send(409, "application/json",

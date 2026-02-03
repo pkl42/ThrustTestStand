@@ -9,6 +9,22 @@
 void WebServerController::setupCalibrationRoutes()
 {
     //
+    // ── GET /api/calibration/escProtocols
+    //
+    server.on("/api/calibration/escProtocols", HTTP_GET,
+              [this](AsyncWebServerRequest *request)
+              {
+                  StaticJsonDocument<256> doc;
+
+                  _thrustStand->fillESCDriverJson(doc);
+
+                  AsyncResponseStream *response =
+                      request->beginResponseStream("application/json");
+
+                  serializeJson(doc, *response);
+                  request->send(response);
+              });
+    //
     // ── GET /api/calibration/calibrate_current
     //
     server.on("/api/calibration", HTTP_GET,
@@ -27,109 +43,122 @@ void WebServerController::setupCalibrationRoutes()
     //
     // ── POST /api/calibration
     //
-    server.on("/api/calibration", HTTP_POST,
-              [this](AsyncWebServerRequest *request)
-              {
-                  bool handled = false;
+    server.on(
+        "/api/calibration",
+        HTTP_POST,
+        [](AsyncWebServerRequest *request)
+        {
+            // No-op headers-only handler
+        },
+        nullptr,
+        [this](AsyncWebServerRequest *request,
+               uint8_t *data,
+               size_t len,
+               size_t index,
+               size_t total)
+        {
+            StaticJsonDocument<512> doc;
+            DeserializationError err = deserializeJson(doc, data, len);
 
-                  /* ---------- Thrust Calibration ---------- */
-                  if (request->hasParam("thrust", true))
-                  {
-                      float cal = request->getParam("thrust", true)->value().toFloat();
-                      _thrustStand->setThrustCalFactor(cal);
-                      handled = true;
-                  }
+            if (err)
+            {
+                request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                return;
+            }
 
-                  /* ---------- Torque Calibration ---------- */
-                  bool hasTorqueParam = false;
+            bool handled = false;
 
-                  float cal1 = 0.0f;
-                  float cal2 = 0.0f;
-                  float dist = 0.0f;
+            // ---------- Thrust Calibration ----------
+            if (doc.containsKey("thrust"))
+            {
+                JsonObject thrustObj = doc["thrust"].as<JsonObject>();
+                if (thrustObj.containsKey("cal"))
+                {
+                    float cal = thrustObj["cal"];
+                    _thrustStand->setThrustCalFactor(cal);
+                    handled = true;
+                }
+            }
 
-                  if (request->hasParam("torque.cal1", true))
-                  {
-                      cal1 = request->getParam("torque.cal1", true)->value().toFloat();
-                      hasTorqueParam = true;
-                  }
+            // ---------- Torque Calibration ----------
+            if (doc.containsKey("torque"))
+            {
+                JsonObject torqueObj = doc["torque"].as<JsonObject>();
 
-                  if (request->hasParam("torque.cal2", true))
-                  {
-                      cal2 = request->getParam("torque.cal2", true)->value().toFloat();
-                      hasTorqueParam = true;
-                  }
+                float cal1 = torqueObj.containsKey("cal1") ? torqueObj["cal1"] : 0.0f;
+                float cal2 = torqueObj.containsKey("cal2") ? torqueObj["cal2"] : 0.0f;
+                float dist = torqueObj.containsKey("distance_mm") ? torqueObj["distance_mm"] : 0.0f;
 
-                  if (request->hasParam("torque.distance_mm", true))
-                  {
-                      dist = request->getParam("torque.distance_mm", true)->value().toFloat();
-                      hasTorqueParam = true;
-                  }
+                if (torqueObj.containsKey("cal1") || torqueObj.containsKey("cal2") || torqueObj.containsKey("distance_mm"))
+                {
+                    _thrustStand->setTorqueCalibration(cal1, cal2, dist);
+                    handled = true;
+                }
+            }
 
-                  if (hasTorqueParam)
-                  {
-                      ESP_LOGI("setupRoutes",
-                               "TorqueCal: torque.cal1=%.3f torque.cal2=%.3f torque.distance_mm=%.3f",
-                               cal1, cal2, dist);
-                      _thrustStand->setTorqueCalibration(cal1, cal2, dist);
-                      handled = true;
-                  }
+            // ---------- Current Calibration ----------
+            if (doc.containsKey("current"))
+            {
+                JsonObject currentObj = doc["current"].as<JsonObject>();
+                if (currentObj.containsKey("sensitivity"))
+                {
+                    float s = currentObj["sensitivity"];
+                    _thrustStand->setCurrentSensitivity(s);
+                    handled = true;
+                }
+            }
 
-                  /* ---------- Current Calibration ---------- */
-                  if (request->hasParam("current.sensitivity", true))
-                  {
-                      float current_sensitivity = request->getParam("current.sensitivity", true)->value().toFloat();
-                      _thrustStand->setCurrentSensitivity(current_sensitivity);
-                      ESP_LOGI("setupRoutes",
-                               "setCurrentSensitivity:%.4f",
-                               current_sensitivity);
-                      handled = true;
-                  }
+            // ---------- Voltage Calibration ----------
+            if (doc.containsKey("voltage"))
+            {
+                JsonObject voltageObj = doc["voltage"].as<JsonObject>();
+                if (voltageObj.containsKey("calibration"))
+                {
+                    float v = voltageObj["calibration"];
+                    _thrustStand->setVoltageCalibrationFactor(v);
+                    handled = true;
+                }
+            }
 
-                  /* ---------- Volate Calibration ---------- */
-                  if (request->hasParam("voltage_calibration", true))
-                  {
-                      float voltage_calibration = request->getParam("voltage_calibration", true)->value().toFloat();
-                      _thrustStand->setVoltageCalibrationFactor(voltage_calibration);
-                      ESP_LOGI("setupRoutes",
-                               "setVoltageCalibrationFactor:%.2f",
-                               voltage_calibration);
-                      handled = true;
-                  }
+            // ---------- Motor PWM Range ----------
+            if (doc.containsKey("motor"))
+            {
+                JsonObject motorObj = doc["motor"].as<JsonObject>();
+                if (motorObj.containsKey("pwm_min_us") && motorObj.containsKey("pwm_max_us"))
+                {
+                    uint16_t minUs = motorObj["pwm_min_us"];
+                    uint16_t maxUs = motorObj["pwm_max_us"];
+                    _thrustStand->setPulseRangeUs(minUs, maxUs);
+                    handled = true;
+                }
+                if (motorObj.containsKey("disarm_timeout_s"))
+                {
+                    uint32_t t = motorObj["disarm_timeout_s"];
+                    _thrustStand->setAutoDisarmTimeOut(t);
+                    handled = true;
+                }
+                if (motorObj.containsKey("esc_driver_type"))
+                {
+                    uint8_t t = motorObj["esc_driver_type"];
+                    handled = _thrustStand->switchDriver(static_cast<EscDriverType>(t));
+                }
+            }
 
-                  /* ---------- Motor PWM Range ---------- */
+            // ---------- Response ----------
+            if (handled)
+            {
+                StaticJsonDocument<16> resp;
+                resp["status"] = "ok";
+                String out;
+                serializeJson(resp, out);
+                request->send(200, "application/json", out);
+            }
+            else
+            {
+                request->send(400, "application/json", "{\"error\":\"Missing or invalid parameters\"}");
+            }
+        });
 
-                  if (request->hasParam("minPulseUs", true))
-                  {
-                      uint16_t minPulseUs = request->getParam("minPulseUs", true)->value().toInt();
-                      if (request->hasParam("maxPulseUs", true))
-                      {
-                          uint16_t maxPulseUs = request->getParam("maxPulseUs", true)->value().toInt();
-                          bool updateFlag = _thrustStand->setPulseRangeUs(minPulseUs, maxPulseUs);
-                          if (updateFlag)
-                              handled = true;
-                      }
-                  }
-
-                  if (request->hasParam("manual_idle_disarm_timeout_s", true))
-                  {
-                      uint32_t manual_idle_disarm_timeout_s = request->getParam("manual_idle_disarm_timeout_s", true)->value().toInt();
-                      _thrustStand->setAutoDisarmTimeOut(manual_idle_disarm_timeout_s);
-                      ESP_LOGI("setupRoutes",
-                               "setAutoDisarmTimeOut:%u",
-                               manual_idle_disarm_timeout_s);
-                      handled = true;
-                  }
-
-                  /* ---------- Response ---------- */
-                  if (handled)
-                  {
-                      request->send(200, "text/plain", "OK");
-                  }
-                  else
-                  {
-                      request->send(400, "text/plain", "Missing or invalid parameters");
-                  }
-              });
     //
     // ── POST /api/calibration/calibrate_current
     //

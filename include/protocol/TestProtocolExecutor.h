@@ -236,6 +236,7 @@ public:
      * @param prop Propeller identifier.
      * @param protocolID Protocol identifier.
      * @param protocolVersion Protocol version string.
+     * @param batteryCells used battery set
      * @param csvFormat Optional CSV formatting override.
      *
      * @return true if context was accepted.
@@ -245,6 +246,8 @@ public:
                        const String &prop,
                        const String &protocolID,
                        const String &protocolVersion,
+                       const BatteryPreset batteryCells,
+                       const EscDriverType escDriverType,
                        const char *csvFormat = nullptr);
 
     /**

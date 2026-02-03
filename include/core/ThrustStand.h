@@ -11,6 +11,9 @@
 #include "core/Config.h"
 #include "core/SafetyLimits.h"
 #include "actuators/MotorESC.h"
+#include "actuators/esc/DShotEscDriver.h"
+#include "actuators/esc/PwmEscDriver.h"
+
 #include "sensors/RPMSensor.h"
 #include "sensors/ThrustSensor.h"
 #include "sensors/TorqueSensor.h"
@@ -148,6 +151,8 @@ public:
      */
     ThrustStand();
 
+    ~ThrustStand();
+
     /**
      * @brief Initialize thrust stand hardware and subsystems.
      *
@@ -160,9 +165,11 @@ public:
     /**
      * @brief Initialize all connected sensors.
      *
+     * @param force forces initialization, where sensor allows this
+     *
      * @return true if all sensors initialized successfully
      */
-    bool init_sensors();
+    bool init_sensors(bool force = false);
 
     /**
      * @brief Arm the motor ESC.
@@ -207,6 +214,8 @@ public:
      * @return true if update succeeded
      */
     bool update();
+
+    void updateEsc();
 
     /**
      * @brief Set the motor throttle.
@@ -259,6 +268,25 @@ public:
      * @note A value of 100.0f disables throttle limiting.
      */
     void setThrottleLimitPercent(float percent, SafetyTripSource source);
+    /**
+     * @brief Set the active battery configuration preset.
+     *
+     * Stores the selected battery preset for informational and contextual use
+     * within the system (e.g. UI display, logging, validation hints).
+     *
+     * @note This function does NOT modify any safety limits such as minimum or
+     *       maximum battery voltage.
+     * @note Selecting a battery preset alone has no direct effect on runtime
+     *       behavior or safety enforcement.
+     * @note Application of preset-derived default limits, if desired, must be
+     *       performed explicitly via a separate mechanism.
+     *
+     * @param preset Selected battery preset (e.g. 3S, 4S, 5S).
+     * @param source CORE_LIMIT or TEST_LIMIT
+     */
+
+    void setBatteryPreset(BatteryPreset preset,
+                          SafetyTripSource source);
 
     /**
      * @brief Configure the maximum allowed motor current limit.
@@ -390,6 +418,8 @@ public:
 
     uint16_t getMinPulseUs() const { return _motor.getMinPulseUs(); }
     uint16_t getMaxPulseUs() const { return _motor.getMaxPulseUs(); }
+
+    bool switchDriver(EscDriverType type);
 
     /**
      * @brief Check if the motor has reached the target RPM.
@@ -576,6 +606,20 @@ public:
      */
     void fillSafetyJson(JsonDocument &doc) const;
 
+    /**
+     * @brief Fill JSON document with battery preset list.
+     *
+     *
+     */
+    void fillBatteryPresetJson(JsonDocument &doc) const;
+
+    /**
+     * @brief Fill JSON document with esc protocol list
+     *
+     *
+     */
+    void fillESCDriverJson(JsonDocument &doc) const;
+
 private:
     static const char *TAG; ///< Logging tag
 
@@ -590,7 +634,14 @@ private:
     ThrustSensor _thrustSensor; ///< Thrust sensor instance
     TorqueSensor _torqueSensor; ///< Torque sensor instance
     RpmSensor _rpmSensor;       ///< RPM sensor instance
-    MotorESC _motor;            ///< Motor ESC controller
+
+    // Driver objects (stay alive as long as _motor exists)
+    // ESC drivers first, then motor, important for class construction sequence
+    PwmEscDriver *_pwmDriver = nullptr;
+    DShotEscDriver *_dshotDriver = nullptr;
+    EscDriverType _escDriverType;
+
+    MotorESC _motor; ///< Motor ESC controller
 
     BusVoltageADC _voltageSensor;           ///< Voltage sensor instance
     CurrentACS758 _currentSensor;           ///< Current sensor instance

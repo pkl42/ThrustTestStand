@@ -112,24 +112,26 @@
 
 			<!-- Middle column -->
 			<div>
+
+				
 				<div class="field">
-					<label for="motor_type">Motor Type:</label>
-					<input type="text" id="motor_type" placeholder="e.g. T-Motor F60 Pro">
+					<label for="test.motor_type">Motor Type:</label>
+					<input type="text" id="test.motor_type" placeholder="e.g. T-Motor F60 Pro" maxlength="64">
 				</div>
 				
 				<div class="field">
-					<label for="esc_type">ESC Type:</label>
-					<input type="text" id="esc_type" placeholder="e.g. FLYCOLOR 45A">
+					<label for="test.esc_type">ESC Type:</label>
+					<input type="text" id="test.esc_type" placeholder="e.g. FLYCOLOR 45A" maxlength="64" >
 				</div>
 
 				<div class="field">
-					<label for="prop_type">Propeller Type:</label>
-					<input type="text" id="prop_type" placeholder="e.g. 5x4.3x3">
+					<label for="test.prop_type">Propeller Type:</label>
+					<input type="text" id="test.prop_type" placeholder="e.g. 5x4.3x3" maxlength="64">
 				</div>
 				
 				<div class="field">
-					<label for="csv_format">CSV Format:</label>
-					<select id="csv_format">
+					<label for="test.csv_format">CSV Format:</label>
+					<select id="test.csv_format">
 						<option value=".,">Standard (.,) – US / ISO</option>
 						<option value=",;">Excel DE (,;) – German</option>
 						<option value=".;">Semicolon (.;) – dot decimal</option>
@@ -137,22 +139,41 @@
 				</div>
 
 				<div class="field">
-					<label for="protocol_select">Test Protocol:</label>
-					<select id="protocol_select">
+					<label for="test.protocol_select">Test Protocol:</label>
+					<select id="test.protocol_select">
 						<option value="">-- no protocol selected --</option>
 					</select>
 				</div>
-
+<!--
 				<div class="field">
 					<label>Protocol Info:</label>
-					<div id="protocol_info" class="small-text">none</div>
+					<div id="test.protocol_info" class="small-text">none</div>
 				</div>
-
+-->
 			</div>
 			<!-- Right column -->
 			<div>
+				<div class="field">
+					<label for="test.battery_cells">Battery Cells:</label>
+					<input
+						type="text"
+						id="test.battery_cells"
+						readonly
+						placeholder="Not configured"
+						title="Battery cells are declared within Safety Limit Section">
+				</div>
+				<div class="field">
+					<label for="test.esc_driver">ESC Protocol:</label>
+					<input
+						type="text"
+						id="test.esc_driver"
+						readonly
+						placeholder="Not configured"
+						title="ESC protocol used during the test. Set in Calibration Section">
+				</div>
+
 				<div class="field button-group">
-					<button onclick="startTest()">Start Test</button>
+					<button onclick="startTest()" id="test.start">Start Test</button>
 				</div>
 				<div class="field button-group">
 					<button onclick="stopTest()">Stop Test</button>
@@ -201,23 +222,25 @@
 				</div>
 				
 				<div class="setup-row-3">
-					<label for="manual_idle_disarm_timeout_s">Auto Disarm on Idle (s):</label>
+					<label for="motor.disarm_timeout_s">Auto Disarm on Idle (s):</label>
 					<input type="number" 
-						id="manual_idle_disarm_timeout_s" 
+						id="motor.disarm_timeout_s" 
 						step="1"
 						max="3600"
-						 min="5">
+						min="5"
+						data-section="motor.disarm_timeout_s">
 					<button
 					  data-api="/api/calibration"
-					  data-params="manual_idle_disarm_timeout_s"
+					  data-params="motor.disarm_timeout_s"
 					  data-action="post+refresh"
 					  data-loader="loadCalibration"
-					  onclick="handleAction(this)">
+					  onclick="handleAction(this)"
+					  data-section="motor.disarm_timeout_s">
 					  Set
 					</button>
 				
 				</div>
-
+				
 
 			</div>
 			<!-- Right column -->
@@ -242,85 +265,60 @@
 
 				<div class="setup-row-3">
 					<label for="limits.throttle_percent">Throttle Limit (%):</label>
-					<input type="number" id="limits.throttle_percent" step="1">
-					<button
-					  data-api="/api/safety"
-					  data-params="limits.throttle_percent"
-					  data-action="post+refresh"
-					  data-loader="loadSafetySettings"
-					  onclick="handleAction(this)">
-					  Set
-					</button>
-					<hr>
+					<input type="number" id="limits.throttle_percent" step="1" data-section="safety">
 				</div>
 
 				<div class="setup-row-3">
 					<label for="limits.current_a">Current Limit (A):</label>
-					<input type="number" id="limits.current_a" step="0.1">
-					<button
-					  data-api="/api/safety"
-					  data-params="limits.current_a"
-					  data-action="post+refresh"
-					  data-loader="loadSafetySettings"
-					  onclick="handleAction(this)">
-					  Set
-					</button>
-					<hr>
+					<input type="number" id="limits.current_a" step="0.1" data-section="safety">
 				</div>
-
-			</div>
-
-			<!-- Middle column -->
-			<div>
-
-				<div class="setup-row-3">
-					<label for="limits.voltage_max_v">Voltage Limit max. (V):</label>
-					<input type="number" id="limits.voltage_max_v" step="0.1">
-					<button
-					  data-api="/api/safety"
-					  data-params="limits.voltage_max_v"
-					  data-action="post+refresh"
-					  data-loader="loadSafetySettings"
-					  onclick="handleAction(this)">
-					  Set
-					</button>
-
-					<hr>
-				
-				</div>
-
-				
-				<div class="setup-row-3">
-					<label for="limits.voltage_min_v">Voltage Limit min. (V):</label>
-					<input type="number" id="limits.voltage_min_v" step="0.1">
-					<button
-					  data-api="/api/safety"
-					  data-params="limits.voltage_min_v"
-					  data-action="post+refresh"
-					  data-loader="loadSafetySettings"
-					  onclick="handleAction(this)">
-					  Set
-					</button>
-					<hr>
-				</div>				
 
 				<div class="setup-row-3">
 					<label for="limits.thrust_gf">Thrust Limit (gf):</label>
-					<input type="number" id="limits.thrust_gf" step="10">
+					<input type="number" id="limits.thrust_gf" step="10" data-section="safety">
+				</div>
+			</div>
+
+			<!-- MIDDLE -->
+			<div>
+				<div class="setup-row-3">
+					<label for="limits.battery_cells">Battery Cells:</label>
+					<select id="limits.battery_cells"
+							data-section="safety"
+							onchange="handleBatteryPresetChange(this)">
+					</select>
+				</div>
+				<div class="setup-row-3">
+					<label for="limits.voltage_max_v">Voltage Limit max. (V):</label>
+					<input type="number" id="limits.voltage_max_v" step="0.1" data-section="safety">
+				</div>
+
+				<div class="setup-row-3">
+					<label for="limits.voltage_min_v">Voltage Limit min. (V):</label>
+					<input type="number" id="limits.voltage_min_v" step="0.1" data-section="safety">
+				</div>
+
+				
+				<div class="field button-group" style="margin-top: 1em;">
+					<span></span>
 					<button
-					  data-api="/api/safety"
-					  data-params="limits.thrust_gf"
-					  data-action="post+refresh"
-					  data-loader="loadSafetySettings"
-					  onclick="handleAction(this)">
-					  Set
+						data-api="/api/safety"
+						data-params="limits.*"
+						data-action="post+refresh"
+						data-loader="loadSafetySettings"
+						onclick="handleAction(this)"
+						data-section="safety">
+						Save Safety Limits
 					</button>
 				</div>
 			</div>
-			<!-- Right column -->
+
+			<!-- RIGHT -->
 			<div>
+
 			</div>
 		</div>
+
 	</section>
 
 
@@ -334,13 +332,14 @@
 			
 				<div class="setup-row-3">
 					<label for="thrust.cal">Thrust Cal-Factor:</label>
-					<input type="number" id="thrust.cal" step="0.01">
+					<input type="number" id="thrust.cal" step="0.01" data-section="thrust.cal">
 					<button
 					  data-api="/api/calibration"
 					  data-params="thrust.cal"
 					  data-action="post"
 					  data-loader="loadCalibration"
-					  onclick="handleAction(this)">
+					  onclick="handleAction(this)"
+					  data-section="thrust.cal">
 					  Set
 					</button>
 					<hr>
@@ -351,17 +350,17 @@
 
 					<div class="setup-row">
 						<label for="torque.cal1">Torque Cal-Factor 1:</label>
-						<input type="number" id="torque.cal1" step="0.01">
+						<input type="number" id="torque.cal1" step="0.01" data-section="torque.cal">
 					</div>
 
 					<div class="setup-row">
 						<label for="torque.cal2">Torque Cal-Factor 2:</label>
-						<input type="number" id="torque.cal2" step="0.01">
+						<input type="number" id="torque.cal2" step="0.01" data-section="torque.cal">
 					</div>
 
 					<div class="setup-row">
 						<label for="torque.distance_mm">Loadcell Distance (mm):</label>
-						<input type="number" id="torque.distance_mm" step="1">
+						<input type="number" id="torque.distance_mm" step="1" data-section="torque.cal">
 					</div>
 
 					<div class="setup-row">
@@ -371,7 +370,8 @@
 						  data-params="torque.distance_mm"
 						  data-action="post"
 						  data-loader="loadCalibration"
-						  onclick="handleAction(this)">
+						  onclick="handleAction(this)"
+						  data-section="torque.cal">
 						  Set Torque Calibration
 						</button>
 					</div>
@@ -383,13 +383,14 @@
 				<div class="setup-row-3">
 
 					<label for="current.sensitivity">Current Sensitivity (voltsPerAmp):</label>
-					<input type="number" id="current.sensitivity" step="0.001">
+					<input type="number" id="current.sensitivity" step="0.001" data-section="current.sensitivity">
 					<button
 					  data-api="/api/calibration"
 					  data-params="current.sensitivity"
 					  data-action="post"
 					  data-loader="loadCalibration"
-					  onclick="handleAction(this)">
+					  onclick="handleAction(this)"
+					  data-section="current.sensitivity">
 					  Set
 					</button>
 
@@ -397,13 +398,14 @@
 			
 				<div class="setup-row-3">
 					<label for="actual_current">Actual Current (A):</label>
-					<input type="number" id="actual_current" step="0.01" placeholder="Enter known current from PSU">
+					<input type="number" id="actual_current" step="0.01" placeholder="Enter known current from PSU" data-section="actual_current">
 					<button
 					  data-api="/api/calibration/calibrate_current"
 					  data-params="actual_current"
 					  data-action="post"
 					  data-loader="loadCalibration"
-					  onclick="handleAction(this)">
+					  onclick="handleAction(this)"
+					  data-section="actual_current">
 					  Set
 					</button>
 					<hr>
@@ -412,13 +414,14 @@
 				<div class="setup-row-3">
 
 				<label for="voltage.calibration">Voltage Calibration:</label>
-				<input type="number" id="voltage.calibration" step="0.01">
+				<input type="number" id="voltage.calibration" step="0.01" data-section="voltage.calibration">
 				<button
 					  data-api="/api/calibration"
 					  data-params="voltage.calibration"
 					  data-action="post"
 					  data-loader="loadCalibration"
-					  onclick="handleAction(this)">
+					  onclick="handleAction(this)"
+					   data-section="voltage.calibration">
 					  Set
 					</button>
 				<hr>
@@ -432,29 +435,40 @@
 					<div class="setup-title">ESC PWM Range</div>
 
 					<div class="setup-row">
-						<label for="motor_pwm.min_us">Min Pulse (µs):</label>
-						<input type="number" id="motor_pwm.min_us" step="1">
+						<label for="motor.pwm_min_us">Min Pulse (µs):</label>
+						<input type="number" id="motor.pwm_min_us" step="1" data-section="motor_pwm">
 					</div>
 
 					<div class="setup-row">
-						<label for="motor_pwm.max_us">Max Pulse (µs):</label>
-						<input type="number" id="motor_pwm.max_us" step="1">
+						<label for="motor.pwm_max_us">Max Pulse (µs):</label>
+						<input type="number" id="motor.pwm_max_us" step="1" data-section="motor_pwm">
 					</div>
 
 					<div class="setup-row">
 						<span></span>
 						<button
 						  data-api="/api/calibration"
-						  data-params="motor_pwm.max_us,motor_pwm.min_us"
+						  data-params="motor.pwm_max_us,motor.pwm_min_us"
 						  data-action="post"
 						  data-loader="loadCalibration"
-						  onclick="handleAction(this)">
+						  onclick="handleAction(this)"
+						  data-section="motor_pwm">
 						  Set ESC PWM Range
 						</button>
 					</div>
 					
 				</div>
-
+				<div class="setup-row-3">
+					<label for="motor.esc_driver_type">ESC Protocol:</label>
+					<select
+						id="motor.esc_driver_type"
+						data-api="/api/calibration"
+						data-section="motor.esc_driver_type"
+						data-params="motor.esc_driver_type"
+						data-action="post"
+						onchange="handleAction(this)">
+					</select>
+				</div>
 			</div>
 		</div>
 

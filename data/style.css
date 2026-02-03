@@ -162,6 +162,22 @@ button:disabled {
     width: 100%;
 }
 
+/* Dirty state for any section button */
+button.dirty {
+    border: 2px solid var(--warn);        /* highlight outline */
+    background-color: var(--button-bg);   /* keep base bg, optionally slightly lighter */
+    box-shadow: 0 0 6px var(--warn);      /* subtle glow */
+    color: var(--button-text);            /* keep readable text */
+    transition: all 0.2s ease;
+}
+
+/* Optional hover effect for dirty buttons */
+button.dirty:hover {
+    border-color: var(--accent);          /* stronger highlight on hover */
+    box-shadow: 0 0 8px var(--accent-glow);
+}
+
+
 
 /* ------- HR --------------*/
 hr {

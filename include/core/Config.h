@@ -3,8 +3,8 @@
 #include <IPAddress.h>
 
 #define THRUSTSTAND_APP_NAME "Motor Thrust Test Stand"
-#define THRUSTSTAND_APP_VERSION "v2.0.0"
-#define THRUSTSTAND_CSV_VERSION "1.1"
+#define THRUSTSTAND_APP_VERSION "v2.1.0"
+#define THRUSTSTAND_CSV_VERSION "1.2"
 
 // #define THRUSTSTAND_GIT_HASH        "a9c4e2f"
 #define THRUSTSTAND_BUILD_DATE __DATE__ " " __TIME__
@@ -70,7 +70,7 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
 // #define HAS_RGB_LED 1
 // #endif
 
-#define RGB_BUILTIN_LED 38
+#define RGB_BUILTIN_LED 48
 #define HAS_RGB_LED 1
 
 #define HX711_DOUT_1_PIN 4 // mcu > HX711 no 1 dout pin 5kg
@@ -131,11 +131,13 @@ const float TEMPERATURE_SENSOR_MAX = 120.; //
 // ==============================================
 // Web Access Point
 // ==============================================
-// AP configuration
-inline const char *AP_SSID = "ThrustStandAP";
-inline const char *AP_PASSWORD = "4711"; // leave empty for open AP
+// AP configuration, details in Config.cpp
+extern const char *AP_SSID;
 
-inline const IPAddress AP_IP(192, 168, 7, 1);
-inline const IPAddress AP_GATEWAY(192, 168, 7, 1);
-inline const IPAddress AP_SUBNET(255, 255, 255, 0);
+extern const char *AP_PASSWORD;
+
+extern const IPAddress AP_IP;
+extern const IPAddress AP_GATEWAY;
+extern const IPAddress AP_SUBNET;
+
 #endif // PINOUT_H

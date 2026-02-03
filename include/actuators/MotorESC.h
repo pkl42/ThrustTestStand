@@ -8,29 +8,21 @@
 
 #include <Arduino.h>
 #include "BaseActuator.h"
+#include "esc/EscSignalDriver.h"
 
 /**
  * @class MotorESC
  * @brief Electronic Speed Controller (ESC) motor actuator for ESP32.
  *
- * This class implements a PWM-based motor controller suitable for
- * RC-style Electronic Speed Controllers (ESCs). It uses the ESP32 LEDC
- * peripheral to generate servo-style PWM signals (typically 50 Hz).
- *
- * The class supports:
- * - Explicit ESC arming and calibration sequences
- * - Throttle limiting
- * - Optional smooth acceleration ramps
- * - Emergency stop integration via BaseActuator
+ * This class implements a motor controller with arming, smoothing,
+ * throttle limiting, and emergency stop support. The actual ESC
+ * signal output is delegated to an EscSignalDriver (PWM, D-Shot, etc.).
  *
  * @section esc_thread_safety Thread / Execution Context Safety
  * - All public methods must be called from non-ISR context.
- * - This class is **not ISR-safe** except for `forceStopHardware()`,
- *   which may be invoked from an emergency stop ISR.
+ * - ISR-safe only: forceStopHardware()
  *
  * @section esc_state_model ESC Internal State Model
- *
- * The ESC operates as a simple explicit state machine:
  *
  * @code
  * ┌──────────┐
@@ -54,9 +46,9 @@
  * @endcode
  *
  * State invariants:
- * - Throttle output is **always 0%** in DISARMED
- * - Throttle > 0% is only allowed in RUNNING
- * - Calling `setThrottle()` while DISARMED does not start the motor
+ * - Throttle output is 0% in DISARMED
+ * - Throttle > 0% only in RUNNING
+ * - Calling setThrottle() while DISARMED does nothing
  * - Emergency stop forces DISARMED immediately
  */
 class MotorESC : public BaseActuator
@@ -65,7 +57,7 @@ public:
     /**
      * @brief ESC operating states.
      *
-     * These states reflect the logical control state of the ESC,
+     * Reflects the logical control state of the ESC,
      * independent of the physical motor speed.
      */
     enum class EscState : uint8_t
@@ -77,52 +69,18 @@ public:
     };
 
     /**
-     * @brief Construct a MotorESC instance.
+     * @brief Construct a MotorESC instance with a signal driver.
      *
-     * @param pin            GPIO pin connected to the ESC signal wire.
-     * @param freq           PWM frequency in Hz (typically 50 Hz).
-     * @param resolution     PWM resolution in bits.
-     * @param channel        ESP32 LEDC channel to use.
+     * @param driver Pointer to an EscSignalDriver implementation (PWM, D-Shot, etc.)
      */
-    MotorESC(uint8_t pin,
-             uint16_t freq = 50,
-             uint8_t resolution = 12,
-             uint8_t channel = 1);
+    explicit MotorESC(EscSignalDriver *driver);
 
     /**
-     * @brief Configure the ESC PWM pulse width range.
+     * @brief Initialize the ESC hardware via the driver.
      *
-     * Defines the minimum and maximum pulse widths corresponding
-     * to 0% and 100% throttle.
+     * Forces the ESC into DISARMED state with zero throttle.
      *
-     * @param minPulseUs     Minimum PWM pulse width in microseconds.
-     * @param maxPulseUs     Maximum PWM pulse width in microseconds.
-     *
-     * @return true if the range is valid and applied, false otherwise.
-     */
-    bool setPulseRangeUs(uint16_t minPulseUs, uint16_t maxPulseUs);
-
-    /**
-     * @brief Get configured minimum PWM pulse width.
-     *
-     * @return Minimum pulse width in microseconds.
-     */
-    uint16_t getMinPulseUs() const { return _minPulseUs; }
-
-    /**
-     * @brief Get configured maximum PWM pulse width.
-     *
-     * @return Maximum pulse width in microseconds.
-     */
-    uint16_t getMaxPulseUs() const { return _maxPulseUs; }
-
-    /**
-     * @brief Initialize the ESC hardware.
-     *
-     * Sets up PWM output and forces the ESC into DISARMED state
-     * with zero throttle.
-     *
-     * @return true on successful initialization, false on failure.
+     * @return true on success, false on failure.
      */
     bool begin() override;
 
@@ -130,11 +88,13 @@ public:
      * @brief Periodic update function.
      *
      * Must be called regularly to process throttle ramps
-     * and maintain correct PWM output.
+     * and maintain correct output.
      *
      * @return true if update succeeded, false otherwise.
      */
     bool update() override;
+
+    void updateEsc();
 
     /**
      * @brief Stop the motor and disarm the ESC.
@@ -164,7 +124,7 @@ public:
     bool arm(uint16_t armTimeMs = 2000);
 
     /**
-     * @brief Disarm the ESC without requiring an error or stop event.
+     * @brief Disarm the ESC.
      *
      * Forces throttle to zero and transitions to DISARMED.
      *
@@ -210,6 +170,35 @@ public:
      */
     EscState getMountState() const { return _escState; }
 
+    /**
+     * @brief Get configured minimum PWM pulse width.
+     *
+     * @return Minimum pulse width in microseconds.
+     */
+    uint16_t getMinPulseUs() const { return _driver ? _driver->getMinPulseUs() : 1000; }
+    /**
+     * @brief Get configured maximum PWM pulse width.
+     *
+     * @return Maximum pulse width in microseconds.
+     */
+    uint16_t getMaxPulseUs() const { return _driver ? _driver->getMaxPulseUs() : 2000; }
+    /**
+     * @brief Configure the ESC PWM pulse width range.
+     *
+     * Defines the minimum and maximum pulse widths corresponding
+     * to 0% and 100% throttle.
+     *
+     * @param minPulseUs     Minimum PWM pulse width in microseconds.
+     * @param maxPulseUs     Maximum PWM pulse width in microseconds.
+     *
+     * @return true if the range is valid and applied, false otherwise.
+     */
+    bool setPulseRangeUs(uint16_t minPulseUs, uint16_t maxPulseUs);
+
+    bool setDriver(EscSignalDriver *driver);
+
+    void writeStop();
+
 protected:
     /**
      * @brief Immediately stop the motor at hardware level.
@@ -221,29 +210,14 @@ protected:
 
 private:
     /**
-     * @brief Set raw PWM pulse width.
+     * @brief Update the driver with the target throttle.
      *
-     * @param pulseWidthUs Pulse width in microseconds.
+     * @param throttlePercent Throttle in percent [0–100]
      */
-    void setPulseWidth(uint16_t pulseWidthUs);
+    void updateThrottle(float throttlePercent);
 
-    /**
-     * @brief Apply throttle percentage to PWM output.
-     *
-     * @param throttlePercent Throttle in percent [0–100].
-     */
-    void applyThrottle(float throttlePercent);
+    EscSignalDriver *_driver; ///< Pointer to signal driver
 
-    // ---------- Hardware configuration ----------
-    uint8_t _pin;                ///< GPIO pin connected to ESC signal
-    uint8_t _channel;            ///< LEDC PWM channel
-    uint16_t _minPulseUs = 1000; ///< Minimum PWM pulse width (µs)
-    uint16_t _maxPulseUs = 2000; ///< Maximum PWM pulse width (µs)
-    uint16_t _freq;              ///< PWM frequency (Hz)
-    uint8_t _resolution;         ///< PWM resolution (bits)
-    uint32_t _maxDuty;           ///< Maximum LEDC duty cycle value
-
-    // ---------- Runtime state ----------
     EscState _escState = EscState::DISARMED; ///< Current ESC state
 
     float _currentThrottle = 0.0f; ///< Currently applied throttle (%)

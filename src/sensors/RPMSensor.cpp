@@ -51,8 +51,16 @@ bool RpmSensor::begin(uint8_t pin,
 {
     if (isReady())
     {
-        // setConfig(config);
-        ESP_LOGI(TAG, "RPM Sensor already initialized and ready.");
+        if (_lastPulseTimeUs == 0 && millis() > 2000)
+        {
+            ESP_LOGW(TAG, "RPM READY but no pulses → auto-reset");
+        }
+        else
+        {
+            ESP_LOGI(TAG, "RPM Sensor READY → reinitializing");
+        }
+
+        reset(true); // ALWAYS force re-arm
         return true;
     }
 
@@ -88,7 +96,7 @@ bool RpmSensor::begin(uint8_t pin,
     noInterrupts();
     _pulseCount = 0;
     _lastPulseTimeUs = 0;
-    _pulseIntervalUs = 0;
+    _pulseIntervalUs = 0; // prevents a phantom RPM spike after reset.
     interrupts();
 
     pinMode(_pin, INPUT_PULLUP);
@@ -104,6 +112,40 @@ bool RpmSensor::begin(uint8_t pin,
     setState(SensorState::SENSOR_READY);
     ESP_LOGI(TAG, "RPM Sensor initialized.");
     return true;
+}
+
+void RpmSensor::reset(bool detachIrq)
+{
+    ESP_LOGI(TAG, "Reset RPM Sensor");
+
+    if (detachIrq)
+        detachInterrupt(digitalPinToInterrupt(_pin));
+
+    noInterrupts();
+    _pulseCount = 0;
+    _lastPulseTimeUs = 0;
+    _pulseIntervalUs = 0;
+    interrupts();
+
+    _rpm = 0.0f;
+    _thresholdPeriod = 0;
+
+    if (_periodBuffer)
+        memset(_periodBuffer, 0, sizeof(uint32_t) * _config.periodBufferSize);
+
+    if (_averageBuffer)
+        memset(_averageBuffer, 0, sizeof(uint32_t) * _config.averageBufferSize);
+
+    _periodBufferIndex = 0;
+    _averageBufferIndex = 0;
+
+    setDataValid(false);
+    _updateCount = 0;
+
+    if (detachIrq)
+        attachInterrupt(digitalPinToInterrupt(_pin), pulseCounter, FALLING);
+
+    setState(SensorState::SENSOR_READY);
 }
 
 bool RpmSensor::update()

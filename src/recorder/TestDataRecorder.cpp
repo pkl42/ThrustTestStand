@@ -201,11 +201,13 @@ void TestDataRecorder::writeCsvMetadata(File &f, const TestRunContext &testConte
     f.printf("# Motor Type     : %s\n", testContext.motorType.c_str());
     f.printf("# ESC Type       : %s\n", testContext.escType.c_str());
     f.printf("# Propeller Type : %s\n", testContext.propellerType.c_str());
+    f.printf("# ESC Protocol   : %s\n", escDriverToString(testContext.escDriverType));
+    f.printf("# Battery Preset : %s\n", batteryPresetToString(testContext.batteryCells));
     f.printf("# Protocol       : %s Version: %s\n", testContext.protocolID.c_str(), testContext.protocolVersion.c_str());
     f.printf("# Completion     : %s\n", execStateToString(testResult.execState));
     if (testResult.safetyState.tripped)
     {
-        f.printf("# SafetyState    : source : %s - reason: %s - value: %f\n",
+        f.printf("# SafetyState    : source : %s - reason: %s - value: %.2f\n",
                  safetyTripSourceToString(testResult.safetyState.source),
                  safetyTripReasonToString(testResult.safetyState.reason),
                  testResult.safetyState.tripValue);
@@ -265,7 +267,7 @@ bool TestDataRecorder::exportStatisticsCsv(const char *path,
         fieldSep, fieldSep, fieldSep, fieldSep);
 
     /* ---------- Data ---------- */
-    if (_sampleIndex == -1)
+    if (_sampleIndex == INVALID_REC_INDEX)
         return true;
 
     for (uint32_t i = 0; i <= _sampleIndex; ++i)
@@ -335,7 +337,7 @@ bool TestDataRecorder::exportMeanCsv(const char *path,
         fieldSep, fieldSep, fieldSep, fieldSep, fieldSep, fieldSep,
         fieldSep, fieldSep, fieldSep, fieldSep, fieldSep);
 
-    if (_sampleIndex == -1)
+    if (_sampleIndex == INVALID_REC_INDEX)
         return true;
 
     for (uint32_t i = 0; i <= _sampleIndex; ++i)

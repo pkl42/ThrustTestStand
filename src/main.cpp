@@ -8,6 +8,7 @@
 #include <esp_log.h>
 #include <pgmspace.h>
 #include <freertos/semphr.h>
+#include "esp_heap_caps.h"
 #include "core/Config.h"
 #include "core/ThrustStand.h"
 #include "protocol/TestProtocolExecutor.h"
@@ -33,6 +34,9 @@ SemaphoreHandle_t dataMutex;
 // Forward Declaration der Tasks
 void thrustStandTask(void *parameter);
 void webTask(void *parameter);
+// void escUpdateTask(void *parameter); // D-Shot is under construction
+
+void printHeapStatus(const char *tag);
 
 void setup()
 {
@@ -78,6 +82,17 @@ void setup()
       0 // Core 0
   );
 
+  // D-Shot is under construction
+  // xTaskCreatePinnedToCore(
+  //     escUpdateTask,
+  //     "escUpdateTask",
+  //     2048,
+  //     NULL,
+  //     2,
+  //     NULL,
+  //     0 // Core 0
+  // );
+
   // Webserver-Task Core 1
   xTaskCreatePinnedToCore(
       webTask,
@@ -88,6 +103,8 @@ void setup()
       NULL,
       1 // Core 1
   );
+
+  printHeapStatus("setup");
 }
 
 void loop()
@@ -126,6 +143,17 @@ void thrustStandTask(void *parameter)
   }
 }
 
+void escUpdateTask(void *parameter)
+{
+  const TickType_t loopDelay = pdMS_TO_TICKS(1); // 1 kHz
+
+  while (true)
+  {
+    thrustStand.updateEsc(); // only calls driver->tick()
+    vTaskDelay(loopDelay);
+  }
+}
+
 // Webserver Task (Core 1)
 void webTask(void *parameter)
 {
@@ -138,4 +166,16 @@ void webTask(void *parameter)
     // AsyncWebServer erledigt alles andere
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
+}
+
+// used for checking free space for increasing the MAX_RECORD_STEPS in TestDataRecorder
+void printHeapStatus(const char *tag)
+{
+  size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+  size_t free32 = heap_caps_get_free_size(MALLOC_CAP_32BIT);
+  size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+
+  ESP_LOGI(tag, "Heap free 8bit : %u bytes", free8);
+  ESP_LOGI(tag, "Heap free 32bit: %u bytes", free32);
+  ESP_LOGI(tag, "Heap largest  : %u bytes", largest);
 }
