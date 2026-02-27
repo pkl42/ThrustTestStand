@@ -21,7 +21,7 @@
 // #include "current_ina226_sensor.h"
 #include "sensors/CurrentACS758Sensor.h"
 #include "sensors/BusVoltageADCSensor.h"
-#include "sensors/ThermocoupleSensor.h"
+#include "sensors/TemperatureSensor.h"
 #include "safety/HardwareEstop.h"
 #include "actuators/StatusLed.h"
 
@@ -105,13 +105,13 @@ enum class ThrottleControlMode
  */
 struct ThrustStandState
 {
-    SensorState thrustSensor;       ///< Thrust sensor state
-    SensorState torqueSensor;       ///< Torque sensor state
-    SensorState chamberTemp;        ///< Chamber temperature sensor state
-    SensorState rpmSensor;          ///< RPM sensor state
-    SensorState currentSensor;      ///< current sensor state
-    SensorState voltageSensor;      ///< voltage sensor state
-    SensorState thermocoupleSensor; ///< Thermocouple sensor state
+    SensorState thrustSensor;  ///< Thrust sensor state
+    SensorState torqueSensor;  ///< Torque sensor state
+    SensorState chamberTemp;   ///< Chamber temperature sensor state
+    SensorState rpmSensor;     ///< RPM sensor state
+    SensorState currentSensor; ///< current sensor state
+    SensorState voltageSensor; ///< voltage sensor state
+    SensorState tempSensor;    ///< temperature sensor state
 
     ActuatorState motor;                ///< Motor actuator state
     MotorESC::EscState motorMountState; ///< Motor ESC / mount state
@@ -643,10 +643,10 @@ private:
 
     MotorESC _motor; ///< Motor ESC controller
 
-    BusVoltageADC _voltageSensor;           ///< Voltage sensor instance
-    CurrentACS758 _currentSensor;           ///< Current sensor instance
-    ThermocoupleSensor _thermocoupleSensor; ///< Thermocouple sensor instance
-    HardwareEstop _hwEstop;                 ///< Emergency stop hardware
+    BusVoltageADC _voltageSensor;  ///< Voltage sensor instance
+    CurrentACS758 _currentSensor;  ///< Current sensor instance
+    TemperatureSensor _tempSensor; ///< Temperature sensor instance
+    HardwareEstop _hwEstop;        ///< Emergency stop hardware
 
     /**
      * @brief Derive the appropriate status LED state.

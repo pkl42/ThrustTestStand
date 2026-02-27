@@ -3,8 +3,8 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#ifndef THERMOCOUPLE_SENSOR_H
-#define THERMOCOUPLE_SENSOR_H
+#ifndef TEMP_MAX31855_SENSOR_H
+#define TEMP_MAX31855_SENSOR_H
 
 #include "BaseSensor.h"
 #include <Adafruit_MAX31855.h>
@@ -16,11 +16,11 @@
  * BaseSensor framework. It provides non-blocking temperature updates and
  * tracks data validity.
  */
-class ThermocoupleSensor : public BaseSensor
+class TempMax31855Sensor : public BaseSensor
 {
 public:
-    ThermocoupleSensor() = default;
-    ~ThermocoupleSensor() = default;
+    TempMax31855Sensor() = default;
+    ~TempMax31855Sensor() = default;
 
     /**
      * @brief Initialize the MAX31855 thermocouple interface
@@ -58,10 +58,10 @@ public:
     float getTemperatureInCelsius() const;
 
 private:
-    const char *TAG = "ThermocoupleSensor";
+    const char *TAG = "MAX31855_Sensor";
 
     Adafruit_MAX31855 _tc{0, 0, 0}; ///< MAX31855 driver instance (pins set in begin)
     float _temperature{0.0f};       ///< Last valid temperature sample in °C
 };
 
-#endif // THERMOCOUPLE_SENSOR_H
+#endif // TEMP_MAX31855_SENSOR_H

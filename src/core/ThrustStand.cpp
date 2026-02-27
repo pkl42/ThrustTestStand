@@ -24,7 +24,7 @@ ThrustStand::ThrustStand()
       _torqueSensor(HX711_DOUT_2_PIN, HX711_SCK_2_PIN,
                     HX711_DOUT_3_PIN, HX711_SCK_3_PIN),
       _rpmSensor(),
-      _thermocoupleSensor(),
+      _tempSensor(),
       _currentSensor(),
       _voltageSensor(),
       _hwEstop(ESTOP_PIN),
@@ -236,7 +236,7 @@ bool ThrustStand::init_sensors(bool force)
             ESP_LOGI(TAG, "# INA226 Current Sensor initialized.");
         }
             */
-    if (CURRENT_SENSOR_INSTALLED && (_currentSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
+    if (CURRENT_SENSOR_INSTALLED && (_currentSensor.getState() == SensorState::SENSOR_UNINITIALIZED) || force)
     {
         if (!_currentSensor.begin(CURRENT_SENSOR_PIN))
         {
@@ -248,9 +248,10 @@ bool ThrustStand::init_sensors(bool force)
         _currentSensor.tare();
     }
 
-    if (TEMPERATURE_SENSOR_INSTALLED && (_thermocoupleSensor.getState() == SensorState::SENSOR_UNINITIALIZED))
+    if ((TEMPERATURE_SENSOR_TYPE > TEMP_SENSOR_NONE) && (_tempSensor.getState() == SensorState::SENSOR_UNINITIALIZED) || force)
     {
-        if (!_thermocoupleSensor.begin(MAX31855_CS_PIN, -1, -1))
+
+        if (!_tempSensor.begin())
         {
             initialize = false;
         }
@@ -311,7 +312,7 @@ bool ThrustStand::updateSensors()
     _state.rpmSensor = _rpmSensor.getState();
 
     ok &= updateTemperature();
-    _state.thermocoupleSensor = _thermocoupleSensor.getState();
+    _state.tempSensor = _tempSensor.getState();
 
     ok &= updateDerivedSensorData();
 
@@ -856,8 +857,17 @@ void ThrustStand::triggerSafetyTrip(SafetyTripSource source, SafetyTripReason re
 
 void ThrustStand::clearSafetyTrip()
 {
-    if (!isSafeToArm())
+    if (!_hwEstop.reset())
+    {
+        ESP_LOGW(TAG, "E-STOP still physically active - cannot clear");
         return;
+    }
+
+    if (!isSafeToArm())
+    {
+        ESP_LOGI(TAG, "isSafeToArm is set to false - not clearance");
+        return;
+    }
 
     _safety.state.tripped = false;
     _safety.state.reason = SafetyTripReason::SAFETY_TRIP_NONE;
@@ -1104,10 +1114,10 @@ bool ThrustStand::updateCurrent()
 
 bool ThrustStand::updateTemperature()
 {
-    if (!_thermocoupleSensor.update())
+    if (!_tempSensor.update())
         return false;
 
-    float temp = _thermocoupleSensor.getTemperatureInCelsius();
+    float temp = _tempSensor.getTemperatureInCelsius();
     _currentDataSet.temperature = temp;
 
     if (_accumulate_stats)
@@ -1242,7 +1252,7 @@ void ThrustStand::fillSystemStateJson(JsonDocument &doc) const
 
     doc["thrust"] = static_cast<uint8_t>(s.thrustSensor);
     doc["torque"] = static_cast<uint8_t>(s.torqueSensor);
-    doc["thermocouple"] = static_cast<uint8_t>(s.thermocoupleSensor);
+    doc["temperature"] = static_cast<uint8_t>(s.tempSensor);
     doc["rpm"] = static_cast<uint8_t>(s.rpmSensor);
     doc["current"] = static_cast<uint8_t>(s.currentSensor);
     doc["voltage"] = static_cast<uint8_t>(s.voltageSensor);

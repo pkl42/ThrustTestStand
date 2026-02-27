@@ -97,13 +97,46 @@ public:
     void attachActuator(BaseActuator *actuator);
 
     /**
-     * @brief Check whether the E-Stop has been triggered.
+     * @brief Check whether the E-Stop has been triggered (latched state).
      *
-     * This method is safe to call from the main loop or tasks.
+     * This returns the internally latched state of the hardware E-Stop.
+     * Once triggered, the E-Stop remains latched until explicitly
+     * cleared using reset(), even if the physical switch is released.
      *
-     * @return true if the E-Stop has been activated, false otherwise.
+     * This method is safe to call from the main loop or RTOS tasks.
+     *
+     * @return true if the E-Stop has been triggered (latched),
+     *         false otherwise.
      */
     bool isTriggered() const;
+
+    /**
+     * @brief Check the current physical state of the E-Stop input.
+     *
+     * This reads the GPIO level directly and evaluates whether the
+     * E-Stop switch is currently electrically active.
+     *
+     * Unlike isTriggered(), this does NOT return the latched state.
+     * It reflects the real-time hardware signal level.
+     *
+     * @return true if the E-Stop switch is physically active,
+     *         false if it is released.
+     */
+    bool isPhysicallyActive() const;
+
+    /**
+     * @brief Attempt to reset the latched E-Stop condition.
+     *
+     * The reset will only succeed if the E-Stop switch is
+     * physically released. If the switch is still active,
+     * the latched state remains unchanged.
+     *
+     * This implements an industrial-style manual reset behavior.
+     *
+     * @return true if the E-Stop latch was successfully cleared,
+     *         false if reset was denied (e.g., switch still active).
+     */
+    bool reset();
 
 private:
     /**
@@ -130,6 +163,8 @@ private:
     bool _activeLow; ///< True if the E-Stop signal is active LOW
 
     volatile bool _triggered = false; ///< Latched E-Stop state set by ISR
+
+    uint32_t _releaseTimestamp = 0; ///< minimum release time before reset allowed
 
     std::vector<BaseActuator *> _actuators; ///< Actuators affected by E-Stop
 };

@@ -16,7 +16,10 @@ HardwareEstop::HardwareEstop(uint8_t gpioPin, bool activeLow)
 
 void HardwareEstop::begin()
 {
-    pinMode(_pin, _activeLow ? INPUT_PULLUP : INPUT_PULLDOWN);
+    pinMode(_pin, _activeLow ? INPUT_PULLDOWN : INPUT_PULLUP);
+
+    bool level = digitalRead(_pin);
+    _triggered = _activeLow ? (level == LOW) : (level == HIGH);
 
     attachInterruptArg(
         digitalPinToInterrupt(_pin),
@@ -39,6 +42,25 @@ bool HardwareEstop::isTriggered() const
     return _triggered;
 }
 
+bool HardwareEstop::isPhysicallyActive() const
+{
+    bool level = digitalRead(_pin);
+    return _activeLow ? (level == LOW) : (level == HIGH);
+}
+
+bool HardwareEstop::reset()
+{
+    if (millis() - _releaseTimestamp < 200)
+        return false; // require 200ms stable release
+
+    // Only allow reset if physical switch is released
+    if (isPhysicallyActive())
+        return false;
+
+    _triggered = false;
+    return true;
+}
+
 void IRAM_ATTR HardwareEstop::isrHandler(void *arg)
 {
     static_cast<HardwareEstop *>(arg)->handleInterrupt();
@@ -48,6 +70,9 @@ void IRAM_ATTR HardwareEstop::handleInterrupt()
 {
     bool level = digitalRead(_pin);
     bool active = _activeLow ? (level == LOW) : (level == HIGH);
+
+    if (!active) // released edge
+        _releaseTimestamp = millis();
 
     if (active)
         _triggered = true;

@@ -3,7 +3,7 @@
 #include <IPAddress.h>
 
 #define THRUSTSTAND_APP_NAME "Motor Thrust Test Stand"
-#define THRUSTSTAND_APP_VERSION "v2.1.0"
+#define THRUSTSTAND_APP_VERSION "v2.2.0"
 #define THRUSTSTAND_CSV_VERSION "1.2"
 
 // #define THRUSTSTAND_GIT_HASH        "a9c4e2f"
@@ -23,12 +23,12 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
    |   5  | IO |   5 | 1_4 |           | HX711-CLK1
    |   6  | IO |   6 | 1_5 |           | HX711-DOUT2
    |   7  | IO |   7 | 1_6 |           | HX711-CLK2
-   |   8  | IO |   8 | 1_7 |           |
+   |   8  | IO |   8 | 1_7 |           | RPM_SENSOR_PIN
    |   9  | IO |   9 | 1_8 |           |
    |  10  | IO |  10 | 1_9 | SPI-SS    |
    |  11  | IO |  11 | 2_0 | SPI-MOSI  |
-   |  12  | IO |  12 | 2_1 | SPI-SCK   |
-   |  13  | IO |  13 | 2_2 | SPI-MISO  |
+   |  12  | IO |  12 | 2_1 | SPI-SCK   | default Adafruit_MAX31855 SCK
+   |  13  | IO |  13 | 2_2 | SPI-MISO  | default Adafruit_MAX31855 MISO
    |  14  | IO |  14 | 2_3 |           | ESC-PWM
    |  15  | IO |  15 | 2_4 |           | HX711-DOUT3
    |  16  | IO |  16 | 2_5 |           | HX711-CLK3
@@ -40,14 +40,14 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
    |  38  | IO |     |     |           | RGB_BUILTIN_LED
    |  39  | IO |     |     |           |
    |  40  | IO |     |     |           |
-   |  41  | IO |     |     | I2C_SCL   |
-   |  42  | IO |     |     | I2C_SDA   | CAGE_SWITCH_PIN
+   |  41  | IO |     |     | I2C_SCL   | MLX90614 SCL
+   |  42  | IO |     |     | I2C_SDA   | MLX90614 SDA
    |  43  | IO |     |     | UART_TX0  |
    |  44  | IO |     |     | UART_RX0  |
    |  45* | IO |     |     |           |
    |  46* | IO |     |     |           |
    |  47  | IO |     |     |           | ESTOP_PIN
-   |  48  | IO |     |     |           |
+   |  48  | IO |     |     |           | CAGE_SWITCH_PIN
 ---+------+----+-----+-----+-----------+---------------------------
 * Strapping pins: IO0, IO3, IO45, IO46
 */
@@ -70,7 +70,7 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
 // #define HAS_RGB_LED 1
 // #endif
 
-#define RGB_BUILTIN_LED 48
+#define RGB_BUILTIN_LED 38
 #define HAS_RGB_LED 1
 
 #define HX711_DOUT_1_PIN 4 // mcu > HX711 no 1 dout pin 5kg
@@ -84,7 +84,7 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
 
 #define MOTOR_ESC_PIN 14
 
-#define RPM_SENSOR_PIN 13 // GPIO pin connected to the optical sensor
+#define RPM_SENSOR_PIN 8 // GPIO pin connected to the optical sensor
 
 #define CURRENT_SENSOR_PIN 1 // GPIO pin for current sensor ACS758
 
@@ -94,7 +94,10 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
 
 #define ESTOP_PIN 47
 
-#define CAGE_SWITCH_PIN 42
+#define CAGE_SWITCH_PIN 48
+
+#define MLX90614_SCL_PIN 41 // with pin 41 the standard I2C SCL pin is used
+#define MLX90614_SDA_PIN 42 // with pin 42 the standard I2C SDA pin is used
 
 // microsecond delay after writing sck pin high or low. This delay could be required for faster mcu's.
 // So far the only mcu reported to need this delay is the ESP32 (issue #35), both the Arduino Due and ESP8266 seems to run fine without it.
@@ -114,8 +117,17 @@ const bool TORQUE_SENSOR_INSTALLED = true;
 const bool CURRENT_SENSOR_INSTALLED = true;
 const bool VOLTAGE_SENSOR_INSTALLED = true;
 
-const bool TEMPERATURE_SENSOR_INSTALLED = false;
 const bool RPM_SENSOR_INSTALLED = true;
+
+// ==============================================
+// Temperature Sensor Selection
+// ==============================================
+
+#define TEMP_SENSOR_NONE 0
+#define TEMP_SENSOR_MAX31855 1
+#define TEMP_SENSOR_MLX90614 2
+
+#define TEMPERATURE_SENSOR_TYPE TEMP_SENSOR_MLX90614
 
 // ==============================================
 // Maximum Range Sensors

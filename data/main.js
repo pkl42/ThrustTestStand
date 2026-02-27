@@ -5,64 +5,6 @@
 		el.value = (typeof digits === "number") ? value.toFixed(digits) : value;
 	}
 	
-	function postFromButton(btn) {
-		const apiPath = btn.dataset.api;
-		const paramIds = btn.dataset.params
-			.split(',')
-			.map(s => s.trim());
-
-		const doRefresh = btn.dataset.refresh === "true";
-
-		const params = new URLSearchParams();
-		const errors = [];
-
-		paramIds.forEach(id => {
-			const el = document.getElementById(id);
-
-			if (!el || el.value.trim() === "") {
-				errors.push(`${id} is missing`);
-				return;
-			}
-
-			const val = Number(el.value);
-			if (!Number.isFinite(val)) {
-				errors.push(`${id} is invalid`);
-				return;
-			}
-
-			params.append(id, val);
-		});
-
-		if (errors.length) {
-			alert(
-				"Cannot save calibration:\n" +
-				errors.map(e => `• ${e}`).join("\n")
-			);
-			return;
-		}
-
-		fetch(apiPath, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-			body: params.toString()
-		})
-		.then(r => {
-			if (!r.ok) throw new Error("Save failed");
-			return r;
-		})
-		.then(() => {
-			if (doRefresh) {
-				refreshFromButton(btn);
-			} else {
-				alert("Value saved");
-			}
-		})
-		.catch(err => {
-			alert("Error during save!");
-			console.error(err);
-		});
-	}
-
 	function refreshFromButton(btn) {
 		const fieldset = btn.closest('fieldset');
 		const apiPath = fieldset?.dataset.api || btn.dataset.api;
@@ -89,24 +31,117 @@
 			});
 	}
 	
-	function handleAction(btn) {
-		const action = btn.dataset.action;      // e.g., "post", "refresh", "post+refresh"
-		const apiPath = btn.dataset.api;
-		const paramIds = btn.dataset.params?.split(',').map(s => s.trim());
+	function postInputs(apiPath, inputs) {
+		const payload = {};
 
-		if (action.includes('post') && paramIds) {
-			postFromButton(btn); // your existing post helper
+		for (const input of inputs) {
+			const path = input.id.split('.');
+			let obj = payload;
+
+			for (let i = 0; i < path.length - 1; i++) {
+				if (!obj[path[i]]) obj[path[i]] = {};
+				obj = obj[path[i]];
+			}
+
+			const value =
+				input.type === 'number'
+					? Number(input.value)
+					: input.value;
+
+			obj[path[path.length - 1]] = value;
+		}
+
+		// 🔑 Return the Promise
+		return fetch(apiPath, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload)
+		})
+		.then(r => {
+			if (!r.ok) throw new Error("POST failed: " + r.status);
+			// try to parse JSON, fallback to text
+			return r.text().then(txt => {
+				try { return JSON.parse(txt); } catch { return txt; }
+			});
+		})
+		.catch(err => {
+			console.error(err);
+			alert("Failed to save settings");
+			throw err; // propagate to handleAction .catch
+		});
+	}
+
+	
+	// Holds dirty flags for all sections
+	const dirtyFlags = {};
+
+
+	function updateDirtyUI(section) {
+		const buttons = document.querySelectorAll(`button[data-section="${section}"]`);
+		const isDirty = dirtyFlags[section];
+
+		buttons.forEach(btn => {
+			if (isDirty) {
+				btn.classList.add('dirty'); // visual highlight only
+			} else {
+				btn.classList.remove('dirty');
+			}
+		});
+	}
+		
+	function handleAction(btn) {
+		const action = btn.dataset.action;
+		const apiPath = btn.dataset.api;
+		const rawParams = btn.dataset.params;
+
+		let inputs = [];
+
+		if (rawParams) {
+			if (rawParams.endsWith('.*')) {
+				// wildcard support, e.g. "limits.*"
+				const prefix = rawParams.slice(0, -1); // "limits."
+				inputs = Array.from(
+					document.querySelectorAll(`input[id^="${prefix}"], select[id^="${prefix}"]`)
+				);
+
+			} else {
+				// explicit list: a,b,c
+				const ids = rawParams.split(',').map(s => s.trim());
+				inputs = ids
+					.map(id => document.getElementById(id))
+					.filter(Boolean);
+			}
+		}
+
+		if (action.includes('post') && inputs.length) {
+			const section = inputs[0].dataset.section; // assume all inputs in same section
+			
+			console.log("POST inputs:", inputs.map(i => i.id));
+
+			postInputs(apiPath, inputs)
+				.then(() => {
+					// only reset dirty flag if POST succeeded
+					if (section) {
+						dirtyFlags[section] = false;
+						updateDirtyUI(section);
+						// updateExecutionStatusUI(); // recompute isExecutable() if needed
+					}
+				})
+				.catch(err => {
+					console.error("Error posting data", err);
+					alert("Failed to save settings. Changes not applied.");
+				});
 		}
 
 		if (action.includes('refresh')) {
-			// special-case: call dedicated loader if needed
 			if (btn.dataset.loader) {
-				window[btn.dataset.loader](); // e.g., "loadSafetySettings"
+				window[btn.dataset.loader]();
 			} else {
-				refreshFromButton(btn); // generic fieldset-based refresh
+				refreshFromButton(btn);
 			}
 		}
 	}
+
 
 
 	
@@ -122,6 +157,15 @@
 		const saved = localStorage.getItem("theme") || "dark";
 		document.documentElement.setAttribute("data-theme", saved);
 	})();
+	
+	
+
+	function isExecutable() {
+		const tripped = document.getElementById('safetyBanner').style.display === 'block';
+		const dirty = dirtyFlags['safety']; // or iterate all relevant sections
+		return !tripped && !dirty;
+	}
+
 	
 	
 	function postParam(apiPath, paramsObj, successMessage) {
@@ -187,11 +231,17 @@
 				setValue('voltage.calibration', cfg.voltage?.calibration, 3);
 
 				/* ---------- Motor PWM ---------- */
-				setValue('motor_pwm.min_us', cfg.motor_pwm?.min_us);
-				setValue('motor_pwm.max_us', cfg.motor_pwm?.max_us);
+				setValue('motor.pwm_min_us', cfg.motor?.pwm_min_us);
+				setValue('motor.pwm_max_us', cfg.motor?.pwm_max_us);
 				
 				/* ---------- Motor Auto Disarm ---------- */
-				setValue('manual_idle_disarm_timeout_s', cfg.manual_idle_disarm_timeout_s);
+				setValue('motor.disarm_timeout_s', cfg.motor?.disarm_timeout_s);
+				
+				/* ---------- ESC Driver Type ---------- */
+				setValue('motor.esc_driver_type', cfg.motor?.esc_driver_type);
+				const label = escDriverToLabel(cfg.motor?.esc_driver_type);
+
+				setValue('test.esc_driver', label);
 			})
 			.catch(err => {
 				console.error("loadCalibration failed:", err);
@@ -210,6 +260,7 @@
 		const tripped = safetyBanner.style.display === 'block';
 
 		const slider = document.getElementById('throttle');
+		const startTestBtn = document.getElementById('test.start');
 
 		if (tripped) {
 			// Reset UI
@@ -218,12 +269,15 @@
 
 			// Prevent slider interaction
 			slider.disabled = true;
+			startTestBtn.disabled=true;
 
 		} else {
 			// Safety cleared → re-enable slider
 			slider.disabled = false;
+			startTestBtn.disabled=false;
 		}
 	}
+
 	
 	function loadSafetySettings() {
         fetch('/api/safety')
@@ -237,6 +291,10 @@
 			setValue('limits.voltage_max_v',  data.limits.voltage_max_v, 2);
 			setValue('limits.voltage_min_v',  data.limits.voltage_min_v, 2);
 			setValue('limits.thrust_gf',     data.limits.thrust_gf, 2);
+			setValue('limits.battery_cells', data.limits.battery_cells);
+			
+			const label = batteryPresetToLabel(data.limits.battery_cells);
+			setValue('test.battery_cells', label);
 
         })
         .catch(err => {
@@ -254,6 +312,68 @@
 			})
 			.catch(err => alert(err));
 	}
+	
+	let batteryPresets = {};
+	let batteryPresetLabelToId = {};
+	
+	function batteryPresetToLabel(presetId) {
+	return batteryPresets[presetId]?.label ?? 'Custom / Not specified';
+	}
+	
+	function batteryPresetToID(label) {
+		return batteryPresetLabelToId[label] ?? null;
+	}
+
+	function loadBatteryPresets() {
+		fetch('/api/safety/battery-presets')
+			.then(r => r.json())
+			.then(data => {
+				const select = document.getElementById('limits.battery_cells');
+				select.innerHTML = '';
+
+				data.presets.forEach(preset => {
+					batteryPresets[preset.id] = preset;
+					batteryPresetLabelToId[preset.label] = preset.id;
+
+					const opt = document.createElement('option');
+					opt.value = preset.id;
+					opt.textContent = preset.label;
+					select.appendChild(opt);
+				});
+			});
+	}	
+	
+	function handleBatteryPresetChange(select) {
+		const preset = batteryPresets[select.value];
+		if (!preset) return;
+
+		// NONE / Calibration preset
+		if (preset.cells === 0) {
+			if (confirm("Disable battery-based voltage limits?")) {
+				setVoltageLimits(preset);
+			}
+			return;
+		}
+
+		if (confirm(
+			`Apply default voltage limits for ${preset.label}?\n` +
+			`Min: ${preset.voltage_min_v} V\n` +
+			`Max: ${preset.voltage_max_v} V`
+		)) {
+			setVoltageLimits(preset);
+		}
+	}
+
+function setVoltageLimits(preset) {
+	const minInput = document.getElementById('limits.voltage_min_v');
+	const maxInput = document.getElementById('limits.voltage_max_v');
+
+	minInput.value = preset.voltage_min_v;
+	maxInput.value = preset.voltage_max_v;
+
+	minInput.dispatchEvent(new Event('input'));
+	maxInput.dispatchEvent(new Event('input'));
+}
 
     /* -----------------------------
        LIVE SECTION
@@ -265,11 +385,14 @@
 	}
 	
 	function onThrottleChange(value) {
-		const tripped = document.getElementById('safetyBanner').style.display === 'block';
-		if (tripped) {
-			alert("Motor disabled: safety trip active!");
-			return; // ignore input
-		}
+    if (!isExecutable()) {
+        alert("Motor disabled: safety trip active or unarmed or unsaved safety/configuation settings!");
+        // reset slider to safe position
+        const slider = document.getElementById('throttle');
+        slider.value = 0;
+        document.getElementById('throttleVal').textContent = '0';
+        return;
+    }
 
 		document.getElementById('throttleVal').innerText = parseFloat(value).toFixed(1);
 		setThrottle(parseFloat(value));
@@ -484,7 +607,7 @@
 
 				updateStateElement("state-thrust", s.thrust);
 				updateStateElement("state-torque", s.torque);
-				updateStateElement("state-thermocouple", s.thermocouple);
+				updateStateElement("state-thermo", s.temperature);
 				updateStateElement("state-rpm", s.rpm);
 				updateStateElement("state-current", s.current);
 				updateStateElement("state-voltage", s.voltage);
@@ -513,6 +636,37 @@
 		// Optionally refresh system state
 		updateSystemState();
 	}
+	
+	let escDrivers={};
+	let escDriversLableToId={};
+	
+	
+	function escDriverToLabel(id) {
+		return escDrivers[id]?.label ?? 'None';
+	}
+	
+	function escDriverToId(label) {
+		return escDriversLableToId[label];
+	}
+	
+	// Populate ESC driver select
+	function loadEscDrivers() {
+		fetch('/api/calibration/escProtocols')
+			.then(r => r.json())
+			.then(data => {
+				const sel = document.getElementById('motor.esc_driver_type');
+				sel.innerHTML = '';
+				data.esc_drivers.forEach(d => {
+					escDrivers[d.id] = d;
+					escDriversLableToId[d.label]=d.id;
+					const opt = document.createElement('option');
+					opt.value = d.id;
+					opt.text = d.label;
+					sel.add(opt);
+				});
+			});
+	}
+
 
    	/* -----------------------------
 	   TEST SECTION
@@ -606,72 +760,65 @@
 		loadProtocols();
 	});
 	
-	function startTest() {
-		if (!selectedProtocol) {
+	async function startTest() {
+		if (!testProtocolSelection) {
 			alert("Please select a test protocol");
 			return;
 		}
+		if (!isExecutable()) {
+			alert("Motor disabled: safety trip active or unarmed or unsaved safety/configuation settings!");
+			return;
+		}
+		const escDriverTypeId=escDriverToId(document.getElementById("test.esc_driver").value);
+		const batteryTypeId= batteryPresetToID  (document.getElementById("test.battery_cells").value);
 
-		const motorType = document.getElementById("motor_type").value;
-		const escType = document.getElementById("esc_type").value;
-		const propType = document.getElementById("prop_type").value;
-		const csvFormat = document.getElementById("csv_format").value;
-		const protocolId = selectedProtocol.id;
-		const protocolVersion = selectedProtocol.version;		
-
-		/* ---------- 1) Configure run context ---------- */
 		const configPayload = {
-			motorType: motorType,
-			escType: escType,
-			propellerType: propType,
-			csvFormat: csvFormat,
-			protocolID: protocolId, 
-			protocolVersion: protocolVersion
+			motorType: document.getElementById("test.motor_type").value,
+			escType: document.getElementById("test.esc_type").value,
+			propellerType: document.getElementById("test.prop_type").value,
+			csvFormat: document.getElementById("test.csv_format").value,
+			protocolID: testProtocolSelection.id,
+			protocolVersion: testProtocolSelection.version,
+			batteryCells: batteryTypeId,
+			escDriverType: escDriverTypeId
 		};
 
-		fetch("/api/test/config", {
-			method: "PUT",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(configPayload)
-		})
-		.then(async r => {
+		try {
+			/* 1) PUT config */
+			const r = await fetch("/api/test/config", {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(configPayload)
+			});
+
 			const res = await r.json();
 			if (!r.ok || res.error) {
-				// include detail if available
-				throw new Error(`Config failed: ${res.error || r.statusText}${res.detail ? " - " + res.detail : ""}`);
+				throw new Error(`Config failed: ${res.error || r.statusText}`);
 			}
-			return res;
-		})
-		.then(() => {
-			/* ---------- 2) Start test ---------- */
-			return fetch("/api/test/start", {
+
+			/* 2) Reload config into UI */
+			await loadTestConfig();
+
+			/* 3) Start test */
+			const startResp = await fetch("/api/test/start", {
 				method: "POST",
 				headers: { "Content-Type": "application/x-www-form-urlencoded" }
 			});
-		})
-		.then(async r => {
-			let res = {};
-			try {
-				res = await r.json();
-			} catch (e) {
-				// Non-JSON response
-			}
 
-			if (!r.ok || res.ok === false) {
-				const errCode = res.error ?? -1;
+			const startRes = await startResp.json();
+			if (!startResp.ok || startRes.ok === false) {
 				throw new Error(
-					`Start failed: ${startErrorToString(errCode)}`
-					+ (res.detail ? " - " + res.detail : "")
+					`Start failed: ${startErrorToString(startRes.error ?? -1)}`
 				);
 			}
 
 			console.log("Test started successfully");
-		})
-		.catch(err => {
+		} catch (err) {
 			alert(err.message);
 			console.error(err);
-		});
+		}
 	}
+
 
 
     function stopTest() {
@@ -696,38 +843,36 @@
 		window.location.href = "/api/export/csv/statistics";
 	}
 	
-	let pendingProtocolValue = null;
 	
 	function loadTestConfig() {
-		fetch("/api/test/config")
+		return fetch("/api/test/config")
 			.then(r => {
 				if (!r.ok) throw new Error("Test Metadata fetch failed");
 				return r.json();
 			})
 			.then(cfg => {
 				if (cfg.motorType) {
-					document.getElementById("motor_type").value = cfg.motorType;
+					document.getElementById("test.motor_type").value = cfg.motorType;
 				}
 				if (cfg.escType) {
-					document.getElementById("esc_type").value = cfg.escType;
+					document.getElementById("test.esc_type").value = cfg.escType;
 				}
 				if (cfg.propellerType) {
-					document.getElementById("prop_type").value = cfg.propellerType;
+					document.getElementById("test.prop_type").value = cfg.propellerType;
 				}
 				if (cfg.csvFormat) {
-					document.getElementById("csv_format").value = cfg.csvFormat || ".,";
+					document.getElementById("test.csv_format").value = cfg.csvFormat || ".,";
 				}
 
-				// remember protocol selection for later
-				if (cfg.protocolID && cfg.protocolVersion != null) {
-					pendingProtocolValue =
-						`${cfg.protocolID}|${cfg.protocolVersion}`;
-
+				if (cfg.protocolID && cfg.protocolVersion != null ) {
+					if (!testProtocolSelection) {
+						testProtocolSelection = {
+							id: String(cfg.protocolID),
+							version: String(cfg.protocolVersion)
+						};
+					}
 					resolveProtocolSelection();
 				}
-			})
-			.catch(err => {
-				console.warn("Failed to load Test Metadata:", err);
 			});
 	}
 
@@ -744,51 +889,50 @@
 	 */
 
 	/** @type {TestProtocolRef | null} */
-	let selectedProtocol = null;
-	let userSelectedProtocol = false;
+	let testProtocolSelection = null;
+	let repoSelectedProtocol = null;
 	
 	function applyProtocolSelection(option) {
-		if (!option || !option.dataset.id || !option.dataset.version) {
-			selectedProtocol = null;
+		if (!option) {
+			testProtocolSelection = null;
 			return;
 		}
 
-		selectedProtocol = {
-			id: option.dataset.id,
-			version: option.dataset.version
-		};
-		
+		const { id, version } = option.dataset;
+		if (!id || !version) {
+			testProtocolSelection = null;
+			return;
+		}
 
-		document.getElementById("protocol_info").textContent =
-			`ID: ${selectedProtocol.id}, Version: ${selectedProtocol.version}`;		
+		testProtocolSelection = { id, version };
 
-		console.log("Protocol selected:", selectedProtocol);
+		//document.getElementById("test.protocol_info").textContent =
+		//	`ID: ${id}, Version: ${version}`;
+
+		console.log("Test Protocol selected:", testProtocolSelection);
 	}
+
 	
 	function resolveProtocolSelection() {
-		const sel = document.getElementById("protocol_select");
-		if (!sel || sel.options.length === 0) return;
+		const sel = document.getElementById("test.protocol_select");
+		if (!sel || !testProtocolSelection) return;
 
-		let optionToSelect = null;
+		const value =
+			`${testProtocolSelection.id}|${testProtocolSelection.version}`;
 
-		// 1) user selection wins
-		if (userSelectedProtocol && selectedProtocol) {
-			const value = `${selectedProtocol.id}|${selectedProtocol.version}`;
-			optionToSelect = Array.from(sel.options)
-				.find(o => o.value === value);
-		}
+		const option = Array.from(sel.options)
+			.find(o => o.value === value);
 
-		// 2) fallback to backend-loaded config
-		if (!optionToSelect && pendingProtocolValue) {
-			optionToSelect = Array.from(sel.options)
-				.find(o => o.value === pendingProtocolValue);
-		}
-
-		if (optionToSelect) {
-			sel.value = optionToSelect.value;
-			applyProtocolSelection(optionToSelect);
+		if (option) {
+			sel.value = value;
+			applyProtocolSelection(option);
+		} else {
+			// selected protocol no longer exists → invalidate
+			testProtocolSelection = null;
+			sel.value = "";
 		}
 	}
+
 		
 	function renderProtocolRepo(list) {
 		const container = document.getElementById("protocol_list");
@@ -814,9 +958,9 @@
 
 			// visual selection only
 			if (
-				selectedProtocol &&
-				selectedProtocol.id === p.id &&
-				selectedProtocol.version === p.version
+				repoSelectedProtocol &&
+				repoSelectedProtocol.id === p.id &&
+				repoSelectedProtocol.version === p.version
 			) {
 				entry.classList.add("selected");
 			}
@@ -826,20 +970,21 @@
 
 		// previously selected protocol vanished
 		if (
-			selectedProtocol &&
+			repoSelectedProtocol &&
 			!list.some(p =>
-				p.id === selectedProtocol.id &&
-				p.version === selectedProtocol.version
+				p.id === repoSelectedProtocol.id &&
+				p.version === repoSelectedProtocol.version
 			)
 		) {
-			selectedProtocol = null;
+			repoSelectedProtocol = null;
+			repoSelectedProtocol=null;
 			clearProtocolRepoView();
 		}
 	}
 
 		
 	function renderProtocolSelect(list) {
-		const sel = document.getElementById("protocol_select");
+		const sel = document.getElementById("test.protocol_select");
 		sel.innerHTML = '<option value="">-- no protocol selected --</option>';
 
 		list.forEach(p => {
@@ -882,7 +1027,7 @@
 
 	function selectProtocolRepo(proto, entryEl) {
 		// clone proto so nothing else can mutate it accidentally
-		selectedProtocol = {
+		repoSelectedProtocol = {
 			id: proto.id,
 			version: proto.version,
 			file: proto.file
@@ -894,7 +1039,7 @@
 		entryEl.classList.add("selected");
 
 		// load exact file (version-safe)
-		loadProtocolDetails(selectedProtocol.file);
+		loadProtocolDetails(repoSelectedProtocol.file);
 	}
 
 	
@@ -939,16 +1084,16 @@
 
 		
 	function deleteSelectedProtocolRepo() {
-		if (!selectedProtocol) {
+		if (!repoSelectedProtocol) {
 			alert("No protocol selected");
 			return;
 		}
 
 		if (!confirm(
-			`Delete protocol ${selectedProtocol.id} v${selectedProtocol.version}?`
+			`Delete protocol ${repoSelectedProtocol.id} v${repoSelectedProtocol.version}?`
 		)) return;
 
-		const params = new URLSearchParams(selectedProtocol);
+		const params = new URLSearchParams(repoSelectedProtocol);
 
 		fetch(`/api/protocols?${params.toString()}`, {
 			method: "DELETE"
@@ -960,10 +1105,10 @@
 				return;
 			}
 
-			selectedProtocol = null;
+			repoSelectedProtocol = null;
 			loadProtocols();
 			clearProtocolRepoView();
-			document.getElementById("protocol_info").textContent = "none";
+			document.getElementById("test.protocol_info").textContent = "none";
 		})
 		.catch(err => {
 			console.error("Delete error", err);
@@ -1008,17 +1153,38 @@
 	window.onload = () => {
 		resetThrottleUI();
 		
-		loadCalibration();
+		loadBatteryPresets();
+		loadEscDrivers();
+		
+		loadCalibration(); // calibration + system config
 		loadSafetySettings();
 		loadTestConfig();
 		
-		// 🔑 bind protocol selection handler ONCE
-		const protocolSelect = document.getElementById("protocol_select");
+		
+		// bind test protocol selection handler ONCE
+		const protocolSelect = document.getElementById("test.protocol_select");
 		protocolSelect.addEventListener("change", e => {
 			const option = e.target.selectedOptions[0];
-			userSelectedProtocol = true;   // user intent wins
 			applyProtocolSelection(option);
-		});		
+		});	
+
+
+		// -----------------------------
+		// Generic input/select change handler for dirty flags
+		// -----------------------------
+		document.querySelectorAll('input[data-section], select[data-section]').forEach(el => {
+			const eventName = el.tagName === 'SELECT' ? 'change' : 'input';
+
+			el.addEventListener(eventName, () => {
+				const section = el.dataset.section;
+				if (!section) return;
+
+				dirtyFlags[section] = true;
+				updateDirtyUI(section);
+				// updateExecutionStatusUI(); // optional
+			});
+		});
+		
 
 		startPolling();
 	};

@@ -64,12 +64,12 @@ bool RpmSensor::begin(uint8_t pin,
         return true;
     }
 
-    ESP_LOGI(TAG, "Initialize RPM Sensor ...");
+    _pin = pin;
+    ESP_LOGI(TAG, "Initialize RPM Sensor on pin: %d ...", pin);
     setState(SensorState::SENSOR_INITIALIZING);
 
     _instance = this;
 
-    _pin = pin;
     _config = config;
     _config.pulsesPerRevolution = _config.pulsesPerRevolution > 0 ? _config.pulsesPerRevolution : 1;
 

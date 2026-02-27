@@ -30,9 +30,10 @@ Some Images of how the hardware is build up.
 - Voltage:
   - Resistor divider (10 kOhm / 1 kOhm, max approx. 33 V) - see notes below for variants
 - RPM:
-  - Infrared reflective optical sensor
+  - Infrared reflective optical sensor (HW-870 Infrared sensor)
 - Temperature:
-  - Thermocouple sensor (MAX31855) - prepared but not yet used
+  - Thermocouple sensor (MAX31855) - prepared but not yet used  
+  - Infrared temperature sensor (MAX90614 - HW-691)
 
 ### Actuators and Safety
 

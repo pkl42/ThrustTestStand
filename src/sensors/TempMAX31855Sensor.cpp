@@ -3,10 +3,10 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "sensors/ThermocoupleSensor.h"
+#include "sensors/TempMAX31855Sensor.h"
 #include <esp_log.h>
 
-bool ThermocoupleSensor::begin(int8_t clkPin, int8_t csPin, int8_t soPin)
+bool TempMax31855Sensor::begin(int8_t clkPin, int8_t csPin, int8_t soPin)
 {
     if (isReady())
     {
@@ -40,7 +40,7 @@ bool ThermocoupleSensor::begin(int8_t clkPin, int8_t csPin, int8_t soPin)
     return true;
 }
 
-bool ThermocoupleSensor::update()
+bool TempMax31855Sensor::update()
 {
     if (!isReady())
         return false;
@@ -69,7 +69,7 @@ bool ThermocoupleSensor::update()
     return true;
 }
 
-float ThermocoupleSensor::getTemperatureInCelsius() const
+float TempMax31855Sensor::getTemperatureInCelsius() const
 {
     return _temperature;
 }
