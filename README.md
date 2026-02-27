@@ -139,8 +139,15 @@ Data is buffered in memory during the test and written to LittleFS as a CSV file
   - HX711_ADC
   - Adafruit ADS1X15
   - Adafruit MAX31855
+  - Adafruit MLX90614
   - INA226
   - LittleFS
+
+---
+
+## Recent Changes
+
+See [CHANGELOG.md](CHANGELOG.md) for a full list of improvements and fixes.  
 
 ---
 
