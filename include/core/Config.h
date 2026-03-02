@@ -3,7 +3,7 @@
 #include <IPAddress.h>
 
 #define THRUSTSTAND_APP_NAME "Motor Thrust Test Stand"
-#define THRUSTSTAND_APP_VERSION "v2.2.0"
+#define THRUSTSTAND_APP_VERSION "v2.2.1"
 #define THRUSTSTAND_CSV_VERSION "1.2"
 
 // #define THRUSTSTAND_GIT_HASH        "a9c4e2f"

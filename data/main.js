@@ -295,6 +295,8 @@
 			
 			const label = batteryPresetToLabel(data.limits.battery_cells);
 			setValue('test.battery_cells', label);
+			
+			setValue('limits.temperature_c',  data.limits.temperature_c,0);
 
         })
         .catch(err => {
@@ -364,16 +366,16 @@
 		}
 	}
 
-function setVoltageLimits(preset) {
-	const minInput = document.getElementById('limits.voltage_min_v');
-	const maxInput = document.getElementById('limits.voltage_max_v');
+	function setVoltageLimits(preset) {
+		const minInput = document.getElementById('limits.voltage_min_v');
+		const maxInput = document.getElementById('limits.voltage_max_v');
 
-	minInput.value = preset.voltage_min_v;
-	maxInput.value = preset.voltage_max_v;
+		minInput.value = preset.voltage_min_v;
+		maxInput.value = preset.voltage_max_v;
 
-	minInput.dispatchEvent(new Event('input'));
-	maxInput.dispatchEvent(new Event('input'));
-}
+		minInput.dispatchEvent(new Event('input'));
+		maxInput.dispatchEvent(new Event('input'));
+	}
 
     /* -----------------------------
        LIVE SECTION

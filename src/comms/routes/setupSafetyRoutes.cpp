@@ -119,6 +119,11 @@ void WebServerController::setupSafetyRoutes()
                     preset,
                     SafetyTripSource::CORE_LIMIT);
             }
+
+            if (limits.containsKey("temperature_c"))
+                _thrustStand->setTemperatureLimitC(
+                    limits["temperature_c"], SafetyTripSource::CORE_LIMIT);
+
             StaticJsonDocument<64> resp;
             resp["status"] = "ok";
 

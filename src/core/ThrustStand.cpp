@@ -984,6 +984,10 @@ void ThrustStand::loadConfig()
     uint8_t batteryPreset = prefs.getUInt("batteryPreset");
     _safety.coreLimits.batteryPreset = cellsToPreset(batteryPreset);
 
+    if (!prefs.isKey("maxTempC"))
+        prefs.putFloat("maxTempC", TEMPERATURE_SENSOR_MAX);
+    _safety.coreLimits.maxTemperatureC = prefs.getFloat("maxTempC");
+
     prefs.end();
 }
 
@@ -1299,6 +1303,7 @@ void ThrustStand::fillSafetyJson(JsonDocument &doc) const
     doc["limits"]["voltage_min_v"] = _safety.coreLimits.minVoltageV;
     doc["limits"]["thrust_gf"] = _safety.coreLimits.maxThrustGF;
     doc["limits"]["battery_cells"] = batteryPresetToCells(_safety.coreLimits.batteryPreset);
+    doc["limits"]["temperature_c"] = _safety.coreLimits.maxTemperatureC;
 }
 
 void ThrustStand::fillBatteryPresetJson(JsonDocument &doc) const
