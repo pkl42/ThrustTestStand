@@ -248,6 +248,8 @@ public:
                        const String &protocolVersion,
                        const BatteryPreset batteryCells,
                        const EscDriverType escDriverType,
+                       const char *startTimeISO,
+                       const char *timezone,
                        const char *csvFormat = nullptr);
 
     /**
@@ -256,28 +258,6 @@ public:
      * @return Test run metadata.
      */
     TestRunContext getRunContext() const { return _runContext; }
-
-    /**
-     * @brief Fill execution status as JSON.
-     *
-     * @param doc Output JSON document.
-     */
-    void fillStatusJson(JsonDocument &doc);
-
-    /**
-     * @brief Fill available protocol list as JSON.
-     *
-     * @param doc Output JSON document.
-     * @return true on success.
-     */
-    bool fillProtocolListJson(JsonDocument &doc) const;
-
-    /**
-     * @brief Fill configuration information as JSON.
-     *
-     * @param doc Output JSON document.
-     */
-    void fillConfigJson(JsonDocument &doc) const;
 
 private:
     static const char *TAG; ///< Logging tag

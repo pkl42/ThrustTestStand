@@ -15,7 +15,7 @@
 #include "protocol/ProtocolManager.h"
 #include "recorder/TestDataRecorder.h"
 #include "comms/WebServerController.h"
-#include "comms/WiFiAPController.h"
+#include "comms/WiFiManager.h"
 
 #define SERIAL_SPEED 115200
 
@@ -24,7 +24,7 @@ TestDataRecorder dataRecorder(thrustStand);
 ProtocolManager protocolManager;
 TestProtocolExecutor testExecutor(thrustStand);
 
-WiFiAPController wifiAP(AP_SSID, AP_PASSWORD);
+WiFiManager *wifi;
 
 // Global Instance
 WebServerController *webServer;
@@ -34,21 +34,19 @@ SemaphoreHandle_t dataMutex;
 // Forward Declaration der Tasks
 void thrustStandTask(void *parameter);
 void webTask(void *parameter);
-// void escUpdateTask(void *parameter); // D-Shot is under construction
 
 void printHeapStatus(const char *tag);
 
 void setup()
 {
-  Serial.begin(SERIAL_SPEED);
+  Serial0.begin(SERIAL_SPEED);
   delay(200);
   esp_log_level_set("*", ESP_LOG_INFO);
   ESP_LOGI("setup", "# %s %s | %s ", THRUSTSTAND_APP_NAME, THRUSTSTAND_APP_VERSION, THRUSTSTAND_BUILD_DATE);
-  Serial.flush();
 
+  wifi = new WiFiManager(WIFI_AP_RESET, AP_SSID, AP_PASSWORD, AP_IP, AP_GATEWAY, AP_SUBNET);
   // WiFi AP starten
-  wifiAP.setAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
-  wifiAP.begin();
+  wifi->begin();
 
   // start Thrust Stand
   while (!thrustStand.init())
@@ -62,7 +60,9 @@ void setup()
   testExecutor.begin();
   testExecutor.setRecorder(&dataRecorder);
 
-  webServer = new WebServerController(&thrustStand, &testExecutor, &dataRecorder, &protocolManager);
+  webServer = new WebServerController(&thrustStand, &testExecutor, &dataRecorder, &protocolManager, wifi);
+
+  webServer->begin();
 
   // Mutex für shared data
   dataMutex = xSemaphoreCreateMutex();
@@ -71,7 +71,7 @@ void setup()
     ESP_LOGE("setup", "Failed to create Mutex!");
   }
 
-  // Sensor/Motor-Task Core 0
+  // Sensor/Motor-Task Core 1
   xTaskCreatePinnedToCore(
       thrustStandTask,
       "thrustStandTask",
@@ -79,21 +79,10 @@ void setup()
       NULL,
       2,
       NULL,
-      0 // Core 0
+      1 // Core 1
   );
 
-  // D-Shot is under construction
-  // xTaskCreatePinnedToCore(
-  //     escUpdateTask,
-  //     "escUpdateTask",
-  //     2048,
-  //     NULL,
-  //     2,
-  //     NULL,
-  //     0 // Core 0
-  // );
-
-  // Webserver-Task Core 1
+  // Webserver-Task Core 0
   xTaskCreatePinnedToCore(
       webTask,
       "WebTask",
@@ -101,7 +90,7 @@ void setup()
       NULL,
       1,
       NULL,
-      1 // Core 1
+      0 // Core 0
   );
 
   printHeapStatus("setup");
@@ -113,13 +102,25 @@ void loop()
 
 // ================= Task Implementierungen =================
 
-// Sensor & Motor Task (Core 0)
+// Sensor & Motor Task (Core 1)
 void thrustStandTask(void *parameter)
 {
-  const TickType_t loopDelay = pdMS_TO_TICKS(10); // 100 Hz
+  const TickType_t loopDelayNormal = pdMS_TO_TICKS(10); // 100 Hz
+  const TickType_t loopDelayFast = pdMS_TO_TICKS(2);    // 500 Hz
 
   while (true)
   {
+
+    // 🔌 ESC Passthrough Mode
+    if (EscPassthrough::isActive())
+    {
+      if (!EscPassthrough::update())
+      {
+        vTaskDelay(loopDelayFast);
+      }
+      continue;
+    }
+
     // 1️⃣ Update hardware (motor, sensors, ESC state machine)
     thrustStand.update();
 
@@ -139,32 +140,23 @@ void thrustStandTask(void *parameter)
       }
     }
 
-    vTaskDelay(loopDelay);
+    vTaskDelay(loopDelayNormal);
   }
 }
 
-void escUpdateTask(void *parameter)
-{
-  const TickType_t loopDelay = pdMS_TO_TICKS(1); // 1 kHz
-
-  while (true)
-  {
-    thrustStand.updateEsc(); // only calls driver->tick()
-    vTaskDelay(loopDelay);
-  }
-}
-
-// Webserver Task (Core 1)
+// Webserver Task (Core 0)
 void webTask(void *parameter)
 {
-  // Webserver starten
-  webServer->begin();
-
+  const TickType_t loopDelayWeb = pdMS_TO_TICKS(500); // 5 Hz
   // Task Loop
   while (true)
   {
-    // AsyncWebServer erledigt alles andere
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    wifi->update();
+    // Periodic update (broadcast live data, etc.)
+    webServer->update();
+
+    // AsyncWebServer handles HTTP/WebSocket internally
+    vTaskDelay(pdMS_TO_TICKS(500)); // ~5 Hz update rate
   }
 }
 

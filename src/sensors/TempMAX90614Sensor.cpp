@@ -55,24 +55,19 @@ bool TempMax90614Sensor::update()
     if (_state != SensorState::SENSOR_READY)
         return false;
 
-    float temp = _mlx.readObjectTempC();
+    float raw = _mlx.readObjectTempC();
 
     // MLX returns very low values on failure (often -273.15)
-    if (isnan(temp) || temp < -100.0f || temp > 1000.0f)
+    if (isnan(raw) || raw < -100.0f || raw > 1000.0f)
     {
         setDataValid(false);
         incrementError();
         return false;
     }
 
-    _temperature = temp;
+    _temperature = raw * _calibration.coefficient + _calibration.offset;
     setDataValid(true);
     _updateCount++;
 
     return true;
-}
-
-float TempMax90614Sensor::getTemperatureInCelsius() const
-{
-    return _temperature;
 }

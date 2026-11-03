@@ -51,7 +51,7 @@ public:
      *
      * @return float Current calibration factor.
      */
-    float getCalibration() { return _loadCell.getCalFactor(); };
+    float getCalibration() const { return _loadCell.getCalFactor(); };
 
     /**
      * @brief Perform a non-blocking update of the thrust reading.
@@ -87,7 +87,7 @@ public:
 
 private:
     const char *TAG = "ThrustSensor"; ///< Logging tag for ESP log messages
-    HX711_ADC _loadCell;              ///< HX711 ADC interface object
+    mutable HX711_ADC _loadCell;      ///< HX711 ADC interface object
     float _thrust = 1.0f;             ///< Last measured thrust value (calibrated)
 };
 

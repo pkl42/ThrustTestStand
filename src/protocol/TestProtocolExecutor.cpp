@@ -75,6 +75,8 @@ bool TestProtocolExecutor::setRunContext(const String &motor,
                                          const String &protocolVersion,
                                          const BatteryPreset batteryCells,
                                          const EscDriverType escDriverType,
+                                         const char *startTimeISO,
+                                         const char *timezone,
                                          const char *csvFormat)
 
 {
@@ -91,6 +93,8 @@ bool TestProtocolExecutor::setRunContext(const String &motor,
     _runContext.protocolVersion = protocolVersion;
     _runContext.batteryCells = batteryCells;
     _runContext.escDriverType = escDriverType;
+    _runContext.startTimeISO = startTimeISO ? String(startTimeISO) : "";
+    _runContext.timezone = timezone ? String(timezone) : "";
 
     if (csvFormat && strlen(csvFormat) == 2)
     {
@@ -128,7 +132,7 @@ StartError TestProtocolExecutor::start(const TestProtocol &protocol)
 
     ThrustStandState standState = _stand.getState();
 
-    if (standState.motorMountState != MotorESC::EscState::ARMED)
+    if (standState.motorMountState != MotorESC::MountState::ARMED)
         return StartError::MotorNotArmed;
 
     _proto = protocol;
@@ -628,44 +632,6 @@ void TestProtocolExecutor::updateProgress()
     //     _protocolExecState.progressPct = 100.f;
 
     _protocolExecState.progressPct = min(_protocolExecState.progressPct, 100.0f);
-}
-
-void TestProtocolExecutor::fillStatusJson(JsonDocument &doc)
-{
-    test_data_accu_t c = _stand.getAccuDataSet();
-    ProtocolExecStatus ctx = getStatus();
-
-    doc["steps_total"] = ctx.totalSteps;
-    doc["unitsTotal"] = ctx.progressUnitsTotal;
-    doc["running"] = ctx.running;
-    if (ctx.execState != ExecState::Idle && ctx.totalSteps > 0)
-    {
-        doc["step"] = (ctx.currentStepIndex >= ctx.totalSteps) ? ctx.totalSteps : (ctx.currentStepIndex + 1);
-        doc["unitsDone"] = (ctx.progressUnitsDone >= ctx.progressUnitsTotal) ? ctx.progressUnitsTotal : (ctx.progressUnitsDone + 1);
-    }
-    else
-    {
-        doc["step"] = 0;
-        doc["unitsDone"] = 0;
-    }
-
-    doc["progress"] = ctx.progressPct;
-
-    doc["thrust_samples"] = c.thrust.n;
-    doc["durationS"] = ctx.durationS;
-    doc["estDurationS"] = ctx.estDurationS;
-    doc["execState"] = static_cast<uint8_t>(ctx.execState);
-    doc["safetyState_tripped"] = ctx.safetyState.tripped;
-}
-
-void TestProtocolExecutor::fillConfigJson(JsonDocument &doc) const
-{
-    doc["motorType"] = _runContext.motorType;
-    doc["escType"] = _runContext.escType;
-    doc["propellerType"] = _runContext.propellerType;
-    doc["csvFormat"] = _runContext.csvFormat;
-    doc["protocolID"] = _runContext.protocolID;
-    doc["protocolVersion"] = _runContext.protocolVersion;
 }
 
 void TestProtocolExecutor::loadConfig()

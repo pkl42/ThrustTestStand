@@ -3,7 +3,7 @@
 #include <IPAddress.h>
 
 #define THRUSTSTAND_APP_NAME "Motor Thrust Test Stand"
-#define THRUSTSTAND_APP_VERSION "v2.2.1"
+#define THRUSTSTAND_APP_VERSION "v2.3.0"
 #define THRUSTSTAND_CSV_VERSION "1.2"
 
 // #define THRUSTSTAND_GIT_HASH        "a9c4e2f"
@@ -36,7 +36,7 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
    |  18  | IO |  18 | 2_7 |           |
    |  19  | IO |  19 | 2_8 | USB/JTAG  |
    |  20  | IO |  20 | 2_9 | USB/JTAG  |
-   |  21  | IO |  21 |     |           |
+   |  21  | IO |  21 |     |           | WIFI_AP_RESET
    |  38  | IO |     |     |           | RGB_BUILTIN_LED
    |  39  | IO |     |     |           |
    |  40  | IO |     |     |           |
@@ -98,6 +98,8 @@ No.| GPIO | IO | RTC | ADC | Default   | Function
 
 #define MLX90614_SCL_PIN 41 // with pin 41 the standard I2C SCL pin is used
 #define MLX90614_SDA_PIN 42 // with pin 42 the standard I2C SDA pin is used
+
+#define WIFI_AP_RESET 21 // when set to low during boot the defaulted setting from Config.cpp are used
 
 // microsecond delay after writing sck pin high or low. This delay could be required for faster mcu's.
 // So far the only mcu reported to need this delay is the ESP32 (issue #35), both the Arduino Due and ESP8266 seems to run fine without it.

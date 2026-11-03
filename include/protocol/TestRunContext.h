@@ -28,6 +28,9 @@ struct TestRunContext
     EscDriverType escDriverType = EscDriverType::ESC_DRIVER_NONE;
 
     char csvFormat[3] = ".,";
+
+    String startTimeISO;
+    String timezone;
 };
 
 #endif // TEST_RUN_CONTEXT_H

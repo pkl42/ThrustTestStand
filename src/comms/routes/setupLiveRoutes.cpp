@@ -6,25 +6,36 @@
 #include "comms/WebServerController.h"
 #include <ArduinoJson.h>
 
+void WebServerController::sendLiveState(AsyncWebSocketClient *client)
+{
+    StaticJsonDocument<512> doc; // same size as used in fillLiveSnapshot
+
+    doc["type"] = MsgType::LIVE;
+    ApiSerializer::writeLiveSnapshot(doc, *_thrustStand);
+
+    doc["test_is_running"] = _executor->isRunning();
+    sendJson(doc, client);
+}
+
 void WebServerController::setupLiveRoutes()
 {
     //
     // ── GET /api/live/snapshot -- live data
-    //
+    // as of switching to push mode this routine no longer necessary
 
-    server.on("/api/live/snapshot", HTTP_GET,
-              [this](AsyncWebServerRequest *request)
-              {
-                  StaticJsonDocument<512> doc;
+    // server.on("/api/live/snapshot", HTTP_GET,
+    //           [this](AsyncWebServerRequest *request)
+    //           {
+    //               StaticJsonDocument<512> doc;
 
-                  _thrustStand->fillLiveSnapshot(doc);
+    //               _thrustStand->fillLiveSnapshot(doc);
 
-                  AsyncResponseStream *response =
-                      request->beginResponseStream("application/json");
+    //               AsyncResponseStream *response =
+    //                   request->beginResponseStream("application/json");
 
-                  serializeJson(doc, *response);
-                  request->send(response);
-              });
+    //               serializeJson(doc, *response);
+    //               request->send(response);
+    //           });
 
     //
     // ── POST /api/live/setThrottle

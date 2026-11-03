@@ -7,49 +7,42 @@
 #define MOTOR_ESC_H
 
 #include <Arduino.h>
+#include <memory>
 #include "BaseActuator.h"
-#include "esc/EscSignalDriver.h"
+#include "esc/DShotEscDriver.h"
+#include "esc/PwmEscDriver.h"
 
 /**
  * @class MotorESC
- * @brief Electronic Speed Controller (ESC) motor actuator for ESP32.
+ * @brief High-level ESC motor controller with safety, state handling, and smoothing.
  *
- * This class implements a motor controller with arming, smoothing,
- * throttle limiting, and emergency stop support. The actual ESC
- * signal output is delegated to an EscSignalDriver (PWM, D-Shot, etc.).
+ * Wraps a protocol-specific @ref EscSignalDriver and provides:
+ * - Arming / disarming logic
+ * - Throttle state machine
+ * - Optional throttle smoothing (ramping)
+ * - Emergency stop handling
+ *
+ * @section esc_arch Architecture
+ * MotorESC acts as a safety and control layer above the raw ESC driver:
+ *
+ * MotorESC (state + safety)
+ *        ↓
+ * EscSignalDriver (PWM / DShot)
  *
  * @section esc_thread_safety Thread / Execution Context Safety
  * - All public methods must be called from non-ISR context.
  * - ISR-safe only: forceStopHardware()
  *
  * @section esc_state_model ESC Internal State Model
+ * (existing diagram unchanged)
  *
- * @code
- * ┌──────────┐
- * │ DISARMED │  ← default after begin()
- * └────┬─────┘
- *      │ arm()
- *      ▼
- * ┌──────────┐
- * │  ARMED   │  ← ready to accept throttle
- * └────┬─────┘
- *      │ setThrottle() > 0
- *      ▼
- * ┌──────────┐
- * │ RUNNING  │
- * └────┬─────┘
- *      │ stop() / forceStopHardware()
- *      ▼
- * ┌──────────┐
- * │ DISARMED │
- * └──────────┘
- * @endcode
+ * @section esc_behavior Key Behavior
+ * - Throttle commands are ignored unless ESC is ARMED or RUNNING
+ * - Smoothing is time-based and handled in update()
+ * - Driver always receives normalized throttle [0–100%]
  *
- * State invariants:
- * - Throttle output is 0% in DISARMED
- * - Throttle > 0% only in RUNNING
- * - Calling setThrottle() while DISARMED does nothing
- * - Emergency stop forces DISARMED immediately
+ * @warning
+ * This class does NOT validate physical motor response (no RPM feedback).
  */
 class MotorESC : public BaseActuator
 {
@@ -60,20 +53,18 @@ public:
      * Reflects the logical control state of the ESC,
      * independent of the physical motor speed.
      */
-    enum class EscState : uint8_t
+    enum class MountState : uint8_t
     {
         DISARMED = 0, ///< Safe state, throttle forced to zero
-        ARMING,       ///< Waiting for arm hold time to elapse
-        ARMED,        ///< ESC armed, zero throttle, ready
-        RUNNING       ///< Throttle > 0%, motor spinning
+        ARMING = 1,   ///< Waiting for arm hold time to elapse
+        ARMED = 2,    ///< ESC armed, zero throttle, ready
+        RUNNING = 3   ///< Throttle > 0%, motor spinning
     };
 
     /**
-     * @brief Construct a MotorESC instance with a signal driver.
-     *
-     * @param driver Pointer to an EscSignalDriver implementation (PWM, D-Shot, etc.)
+     * @brief Construct a MotorESC instance
      */
-    explicit MotorESC(EscSignalDriver *driver);
+    explicit MotorESC(uint8_t escPin);
 
     /**
      * @brief Initialize the ESC hardware via the driver.
@@ -94,8 +85,6 @@ public:
      */
     bool update() override;
 
-    void updateEsc();
-
     /**
      * @brief Stop the motor and disarm the ESC.
      *
@@ -115,11 +104,14 @@ public:
     /**
      * @brief Arm the ESC.
      *
-     * Transitions from DISARMED → ARMED by holding
-     * minimum throttle for the specified duration.
+     * Starts arming sequence by holding minimum throttle for a defined duration.
      *
-     * @param armTimeMs Duration to hold minimum throttle (ms).
-     * @return true if arming sequence started successfully.
+     * @param armTimeMs Duration to hold minimum throttle (ms)
+     * @return true if arming process started
+     *
+     * @note
+     * - Actual transition to ARMED occurs after armTimeMs in update().
+     * - While ARMING, throttle commands are ignored.
      */
     bool arm(uint16_t armTimeMs = 2000);
 
@@ -128,21 +120,32 @@ public:
      *
      * Forces throttle to zero and transitions to DISARMED.
      *
-     * @return true if disarm was successful.
+     * @param forceFlag If true, bypasses state restrictions
+     * @return true if disarm was successful
+     *
+     * @note
+     * Should be called before changing driver or configuration.
      */
-    bool disarm();
+    bool disarm(bool forceFlag = false);
 
     /**
      * @brief Set motor throttle.
      *
-     * If throttle > 0% and ESC is ARMED, the state transitions
-     * to RUNNING.
+     * If throttle > 0% and ESC is ARMED, transitions to RUNNING.
      *
-     * @param throttlePercent Target throttle in percent [0–100].
-     * @param smooth          Enable smooth acceleration ramp.
-     * @param transitionTimeMs Duration of acceleration ramp (ms).
+     * @param throttlePercent Target throttle in percent [0–100]
+     * @param smooth Enable time-based smoothing (ramp)
+     * @param transitionTimeMs Duration of ramp (ms)
      *
-     * @return The clamped throttle value actually applied.
+     * @return The clamped throttle value actually applied
+     *
+     * @note
+     * - If smoothing is enabled, the target is reached gradually
+     *   via update().
+     * - If smoothing is disabled, throttle is applied immediately.
+     *
+     * @warning
+     * Calling this while DISARMED has no effect.
      */
     float setThrottle(float throttlePercent,
                       bool smooth = false,
@@ -151,8 +154,11 @@ public:
     /**
      * @brief Check if motor has reached its target throttle.
      *
-     * @param tolerancePercent Allowed deviation from target.
-     * @return true if within tolerance, false otherwise.
+     * @param tolerancePercent Allowed deviation from target
+     * @return true if current throttle is within tolerance
+     *
+     * @note
+     * Useful when using smoothing to detect ramp completion.
      */
     bool isAtTargetSpeed(float tolerancePercent = 2.0f) const;
 
@@ -166,38 +172,45 @@ public:
     /**
      * @brief Get the current ESC control state.
      *
-     * @return Current EscState.
+     * @return Current MountState.
      */
-    EscState getMountState() const { return _escState; }
+    MountState getMountState() const { return _mountState; }
+
+    ESCConfig getDriverConfig() const { return _driverConfig; }
 
     /**
-     * @brief Get configured minimum PWM pulse width.
+     * @brief Set driver-specific configuration.
      *
-     * @return Minimum pulse width in microseconds.
+     * Applies configuration parameters to the underlying driver.
+     *
+     * @param driverConfig Configuration to apply
+     * @return true if successfully applied
+     *
+     * @note
+     * - Not all parameters are used by all drivers.
+     * - Should only be called while DISARMED.
      */
-    uint16_t getMinPulseUs() const { return _driver ? _driver->getMinPulseUs() : 1000; }
-    /**
-     * @brief Get configured maximum PWM pulse width.
-     *
-     * @return Maximum pulse width in microseconds.
-     */
-    uint16_t getMaxPulseUs() const { return _driver ? _driver->getMaxPulseUs() : 2000; }
-    /**
-     * @brief Configure the ESC PWM pulse width range.
-     *
-     * Defines the minimum and maximum pulse widths corresponding
-     * to 0% and 100% throttle.
-     *
-     * @param minPulseUs     Minimum PWM pulse width in microseconds.
-     * @param maxPulseUs     Maximum PWM pulse width in microseconds.
-     *
-     * @return true if the range is valid and applied, false otherwise.
-     */
-    bool setPulseRangeUs(uint16_t minPulseUs, uint16_t maxPulseUs);
+    bool setDriverConfig(ESCConfig &driverConfig);
 
-    bool setDriver(EscSignalDriver *driver);
+    /**
+     * @brief Set the ESC driver type.
+     *
+     * Creates and initializes the corresponding driver implementation
+     * (e.g. PWM or DShot).
+     *
+     * @param type Desired driver type
+     * @return true if driver was created and initialized successfully
+     *
+     * @note
+     * - Replaces any previously active driver.
+     * - Should only be called while DISARMED.
+     */
+    bool setDriver(EscDriverType type);
 
-    void writeStop();
+    /**
+     * @brief Get currently active driver type.
+     */
+    EscDriverType getDriverType() const { return _escDriverType; };
 
 protected:
     /**
@@ -210,15 +223,26 @@ protected:
 
 private:
     /**
-     * @brief Update the driver with the target throttle.
+     * @brief Update the driver with the current throttle value.
      *
-     * @param throttlePercent Throttle in percent [0–100]
+     * Converts logical throttle into driver output.
      */
     void updateThrottle(float throttlePercent);
 
-    EscSignalDriver *_driver; ///< Pointer to signal driver
+    std::unique_ptr<EscSignalDriver> _driver; ///< owned ESC driver
+    ESCConfig _driverConfig;
 
-    EscState _escState = EscState::DISARMED; ///< Current ESC state
+    EscDriverType _escDriverType = EscDriverType::ESC_DRIVER_NONE;
+    uint8_t _escPin;
+
+    MountState _mountState = MountState::DISARMED; ///< Current ESC state
+
+    /**
+     * @brief Reset all throttle-related state variables.
+     *
+     * Used during stop/disarm transitions.
+     */
+    void resetThrottleValues();
 
     float _currentThrottle = 0.0f; ///< Currently applied throttle (%)
     float _targetThrottle = 0.0f;  ///< Desired target throttle (%)

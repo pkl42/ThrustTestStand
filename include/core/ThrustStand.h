@@ -7,12 +7,11 @@
 #ifndef THRUST_STAND_H
 #define THRUST_STAND_H
 
-#include <ArduinoJson.h>
 #include "core/Config.h"
 #include "core/SafetyLimits.h"
 #include "actuators/MotorESC.h"
-#include "actuators/esc/DShotEscDriver.h"
-#include "actuators/esc/PwmEscDriver.h"
+
+#include "actuators/esc/EscPassthrough.h"
 
 #include "sensors/RPMSensor.h"
 #include "sensors/ThrustSensor.h"
@@ -24,6 +23,8 @@
 #include "sensors/TemperatureSensor.h"
 #include "safety/HardwareEstop.h"
 #include "actuators/StatusLed.h"
+
+#include "event/EventBus.h"
 
 /**
  * @brief Data container for a single set of thrust stand measurements.
@@ -98,6 +99,30 @@ enum class ThrottleControlMode
 };
 
 /**
+ * @brief Test Stand mode
+ */
+enum class SystemMode
+{
+    NORMAL = 0,         // thrust stand operation
+    ESC_PASSTHROUGH = 1 // USB ↔ ESC bridge
+};
+
+static const char *systemModeToString(SystemMode mode)
+{
+    switch (mode)
+    {
+    case SystemMode::NORMAL:
+        return "MODE_TEST";
+
+    case SystemMode::ESC_PASSTHROUGH:
+        return "MODE_ESC_PASSTHROUGH";
+
+    default:
+        return "MODE_UNKNOWN";
+    }
+}
+
+/**
  * @brief Aggregated machine-level state of the thrust stand.
  *
  * Contains the current state of all sensors and actuators. Intended for
@@ -113,12 +138,28 @@ struct ThrustStandState
     SensorState voltageSensor; ///< voltage sensor state
     SensorState tempSensor;    ///< temperature sensor state
 
-    ActuatorState motor;                ///< Motor actuator state
-    MotorESC::EscState motorMountState; ///< Motor ESC / mount state
+    ActuatorState motor;                  ///< Motor actuator state
+    MotorESC::MountState motorMountState; ///< Motor ESC / mount state
 
     ThrottleControlMode controlMode = ThrottleControlMode::MANUAL;
     uint32_t idleTimeMs = 0;
 };
+
+namespace ThrustStandEvents
+{
+    enum StateChangeBits : uint16_t
+    {
+        CHANGE_TRUST_SENSOR = 1 << 0,
+        CHANGE_TORQUE_SENSOR = 1 << 1,
+        CHANGE_CHAMBER_SENSOR = 1 << 2,
+        CHANGE_RPM_SENSOR = 1 << 3,
+        CHANGE_CURRENT_SENSOR = 1 << 4,
+        CHANGE_VOLTAGE_SENSOR = 1 << 5,
+        CHANGE_TEMP_SENSOR = 1 << 6,
+        CHANGE_MOTOR_MOUNT = 1 << 7,
+        CHANGE_MOTOR_STATE = 1 << 8
+    };
+}
 
 /**
  * @class ThrustStand
@@ -214,8 +255,6 @@ public:
      * @return true if update succeeded
      */
     bool update();
-
-    void updateEsc();
 
     /**
      * @brief Set the motor throttle.
@@ -376,6 +415,8 @@ public:
 
     SafetyState getSafetyState() const { return _safety.state; }
 
+    ThrustStandSafety getSafety() const { return _safety; }
+
     /**
      * @brief Check whether the propeller cage is open.
      *
@@ -407,19 +448,15 @@ public:
     /**
      * @brief Get current motor ESC state.
      */
-    MotorESC::EscState getMotorState() const { return _motor.getMountState(); }
+    MotorESC::MountState getMotorState() const { return _motor.getMountState(); }
 
-    /**
-     * @brief Configure the ESC pulse range.
-     *
-     * Validates min and max microsecond pulses.
-     */
-    bool setPulseRangeUs(uint16_t minPulseUs, uint16_t maxPulseUs);
+    bool setESCDriver(EscDriverType type);
 
-    uint16_t getMinPulseUs() const { return _motor.getMinPulseUs(); }
-    uint16_t getMaxPulseUs() const { return _motor.getMaxPulseUs(); }
+    ESCConfig getESCDriverConfig() const { return _motor.getDriverConfig(); }
 
-    bool switchDriver(EscDriverType type);
+    bool setESCDriverConfig(ESCConfig &escConfig);
+
+    EscDriverType getESCDriver() const { return _escDriverType; };
 
     /**
      * @brief Check if the motor has reached the target RPM.
@@ -436,10 +473,12 @@ public:
      */
     void setAutoDisarmTimeOut(uint32_t autoDisarmS);
 
+    uint32_t getAutoDisarmTimeOut() const { return (_autoDisarmMs / 1000UL); }
+
     /**
      * @brief Get thrust sensor calibration factor.
      */
-    float getThrustCalFactor();
+    float getThrustCalFactor() const;
 
     /**
      * @brief Set thrust sensor calibration factor.
@@ -451,14 +490,27 @@ public:
      *
      * @param cal1 Calibration factor for cell 1
      * @param cal2 Calibration factor for cell 2
-     * @param distance Lever arm distance [m]
+     * @param distance Lever arm distance [mm]
      */
     void setTorqueCalibration(float cal1 = 0, float cal2 = 0, float distance = 0);
 
     /**
      * @brief Get current torque sensor calibration.
      */
-    TorqueSensor::Calibration getTorqueCalibration();
+    TorqueSensor::Calibration getTorqueCalibration() const;
+
+    /**
+     * @brief Set temperature sensor calibration parameters.
+     *
+     * @param coefficient
+     * @param offset
+     */
+    void setTemperatueCalibration(float coefficient = 1.f, float offset = 0.f);
+
+    /**
+     * @brief Get current temperature sensor calibration.
+     */
+    BaseTemperatureSensor::Calibration getTemperatureCalibration() const;
 
     /**
      * @brief Set current sensor sensitivity.
@@ -529,6 +581,10 @@ public:
 
     float getVoltageCalibrationFactor() const { return (_voltageSensor.getCalibrationFactor()); };
 
+    RpmUiConfig getRPMUICalibration() const { return _rpmUIConfig; };
+
+    bool setRPMUICalibration(const RpmUiConfig &rpmUIConfig);
+
     /**
      * @brief Get current live sensor data snapshot.
      *
@@ -572,58 +628,18 @@ public:
      */
     void resetNVS();
 
-    /**
-     * @brief Fill JSON document with calibration parameters.
-     *
-     * Populates the provided JSON document with all persisted calibration
-     * values, including thrust, torque, current, and voltage calibration
-     * factors.
-     *
-     * Intended for UI display, backup, or diagnostic export.
-     *
-     * @param doc JSON document to populate
-     */
-    void fillCalibrationJson(JsonDocument &doc);
+    bool enterEscPassthrough();
+    void exitEscPassthrough();
 
-    /**
-     * @brief Fill JSON document with a live measurement snapshot.
-     *
-     * Contains instantaneous values and safety state.
-     */
-    void fillLiveSnapshot(JsonDocument &doc) const;
-
-    /**
-     * @brief Fill JSON document with system state information.
-     *
-     * Includes sensor presence, motor state, and motor mount status.
-     */
-    void fillSystemStateJson(JsonDocument &doc) const;
-
-    /**
-     * @brief Fill JSON document with safety limits and current safety state.
-     *
-     * Includes throttle/current/voltage/thrust limits and trip state.
-     */
-    void fillSafetyJson(JsonDocument &doc) const;
-
-    /**
-     * @brief Fill JSON document with battery preset list.
-     *
-     *
-     */
-    void fillBatteryPresetJson(JsonDocument &doc) const;
-
-    /**
-     * @brief Fill JSON document with esc protocol list
-     *
-     *
-     */
-    void fillESCDriverJson(JsonDocument &doc) const;
+    SystemMode getSystemMode() const { return _systemMode; }
+    bool isPassthroughActive() const { return _systemMode == SystemMode::ESC_PASSTHROUGH; }
 
 private:
     static const char *TAG; ///< Logging tag
 
     ThrustStandState _state;
+    ThrustStandState _lastState;
+    void checkStateChanges();
 
     static test_data_t _currentDataSet;   ///< Current live data snapshot
     static test_data_accu_t _accuDataSet; ///< Cumulative data for statistics
@@ -634,19 +650,17 @@ private:
     ThrustSensor _thrustSensor; ///< Thrust sensor instance
     TorqueSensor _torqueSensor; ///< Torque sensor instance
     RpmSensor _rpmSensor;       ///< RPM sensor instance
-
-    // Driver objects (stay alive as long as _motor exists)
-    // ESC drivers first, then motor, important for class construction sequence
-    PwmEscDriver *_pwmDriver = nullptr;
-    DShotEscDriver *_dshotDriver = nullptr;
-    EscDriverType _escDriverType;
+    RpmUiConfig _rpmUIConfig;   ///< RPM sensor configuration
 
     MotorESC _motor; ///< Motor ESC controller
+    EscDriverType _escDriverType = EscDriverType::ESC_DRIVER_PWM;
 
     BusVoltageADC _voltageSensor;  ///< Voltage sensor instance
     CurrentACS758 _currentSensor;  ///< Current sensor instance
     TemperatureSensor _tempSensor; ///< Temperature sensor instance
     HardwareEstop _hwEstop;        ///< Emergency stop hardware
+
+    SystemMode _systemMode = SystemMode::NORMAL;
 
     /**
      * @brief Derive the appropriate status LED state.

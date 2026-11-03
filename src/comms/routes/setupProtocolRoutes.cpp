@@ -2,6 +2,19 @@
 #include "comms/WebServerController.h"
 #include <ArduinoJson.h>
 
+void WebServerController::sendProtocolList(AsyncWebSocketClient *client)
+{
+    StaticJsonDocument<128 + 80 * MAX_PROTOCOLS> doc;
+
+    doc["type"] = MsgType::PROTOCOL_LIST;
+    if (!_protocolManager->fillProtocolListJson(doc))
+    {
+        // request->send(500, "application/json", "{\"error\":\"Failed to list protocols\"}");
+        return;
+    }
+    sendJson(doc, client);
+}
+
 void WebServerController::setupProtocolRoutes()
 {
 
@@ -51,20 +64,20 @@ void WebServerController::setupProtocolRoutes()
               });
 
     // List protocols
-    server.on("/api/protocols", HTTP_GET, [this](AsyncWebServerRequest *request)
-              {
-                ESP_LOGI("WebServerController", "/api/protocols - HTTP_GET");
-        StaticJsonDocument<128 + 80 * MAX_PROTOCOLS> doc;
+    // server.on("/api/protocols", HTTP_GET, [this](AsyncWebServerRequest *request)
+    //           {
+    //             ESP_LOGI("WebServerController", "/api/protocols - HTTP_GET");
+    //     StaticJsonDocument<128 + 80 * MAX_PROTOCOLS> doc;
 
-        if (!_protocolManager->fillProtocolListJson(doc))
-        {
-            request->send(500, "application/json", "{\"error\":\"Failed to list protocols\"}");
-            return;
-        }
+    //     if (!_protocolManager->fillProtocolListJson(doc))
+    //     {
+    //         request->send(500, "application/json", "{\"error\":\"Failed to list protocols\"}");
+    //         return;
+    //     }
 
-        String out;
-        serializeJson(doc, out);
-        request->send(200, "application/json", out); });
+    //     String out;
+    //     serializeJson(doc, out);
+    //     request->send(200, "application/json", out); });
 
     // Upload protocol
     server.on("/api/protocols", HTTP_POST, [](AsyncWebServerRequest * /*req*/) {}, nullptr, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
@@ -85,7 +98,9 @@ void WebServerController::setupProtocolRoutes()
                   }
 
                   request->send(200, "application/json",
-                                "{\"status\":\"ok\",\"id\":\"" + id + "\",\"version\":\"" + version + "\"}"); });
+                                "{\"status\":\"ok\",\"id\":\"" + id + "\",\"version\":\"" + version + "\"}");
+                            
+                sendProtocolList(); });
 
     // Delete protocol
     server.on("/api/protocols", HTTP_DELETE, [this](AsyncWebServerRequest *request)
@@ -106,5 +121,6 @@ void WebServerController::setupProtocolRoutes()
             return;
         }
 
-        request->send(200, "application/json", "{\"status\":\"deleted\"}"); });
+        request->send(200, "application/json", "{\"status\":\"deleted\"}");
+        sendProtocolList(); });
 }

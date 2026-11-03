@@ -130,7 +130,8 @@ bool ProtocolManager::loadProtocol(const String &id,
 
 bool ProtocolManager::fillProtocolListJson(JsonDocument &doc) const
 {
-    JsonArray arr = doc.to<JsonArray>();
+    // JsonArray arr = doc.to<JsonArray>();
+    JsonArray arr = doc.createNestedArray("protocols");
 
     File dir = LittleFS.open(PROTOCOL_DIR, "r");
     if (!dir || !dir.isDirectory())

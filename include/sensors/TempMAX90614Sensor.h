@@ -6,7 +6,7 @@
 #ifndef TEMP_MAX90614_SENSOR_H
 #define TEMP_MAX90614_SENSOR_H
 
-#include "BaseSensor.h"
+#include "BaseTemperatureSensor.h"
 #include <Adafruit_MLX90614.h>
 #include <Wire.h>
 
@@ -14,10 +14,10 @@
  * @brief Infrared temperature sensor using MLX90614 (I2C)
  *
  * This class wraps the Adafruit_MLX90614 driver and integrates it into the
- * BaseSensor framework. It provides non-blocking temperature updates and
+ * BaseTemperatureSensor/BaseSensor framework. It provides non-blocking temperature updates and
  * tracks data validity.
  */
-class TempMax90614Sensor : public BaseSensor
+class TempMax90614Sensor : public BaseTemperatureSensor
 {
 public:
     TempMax90614Sensor() = default;
@@ -43,19 +43,10 @@ public:
      */
     bool update() override;
 
-    /**
-     * @brief Get the last measured temperature
-     *
-     * @return Temperature in degrees Celsius.
-     *         The returned value is only valid if hasValidData() returns true.
-     */
-    float getTemperatureInCelsius() const;
-
 private:
     const char *TAG = "MAX90614_Sensor";
 
     Adafruit_MLX90614 _mlx;
-    float _temperature{0.0f}; ///< Last valid temperature sample in °C
 };
 
 #endif // TEMP_MAX90614_SENSOR_H

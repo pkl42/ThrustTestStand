@@ -10,11 +10,18 @@ public:
 
     void setAPConfig(IPAddress ip, IPAddress gateway, IPAddress subnet);
 
+    void setLocalConfig(const char *local_ssid, const char *local_password);
+
     void begin();
 
+    bool startMDNS(const char *hostname);
+
 private:
+    static const char *TAG;
     const char *ssid;
     const char *password;
+    const char *local_ssid;
+    const char *local_password;
     IPAddress _ip, _gateway, _subnet;
 };
 

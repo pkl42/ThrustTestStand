@@ -196,8 +196,8 @@ void TestDataRecorder::writeCsvMetadata(File &f, const TestRunContext &testConte
     f.println("# ==================================");
     f.printf("# Application    : %s\n", THRUSTSTAND_APP_NAME);
     f.printf("# AppVersion     : %s\n", THRUSTSTAND_APP_VERSION);
-    f.printf("# CSVVersion     : %s\n", THRUSTSTAND_CSV_VERSION);
-    f.printf("# Build          : %s\n", THRUSTSTAND_BUILD_DATE);
+    // f.printf("# CSVVersion     : %s\n", THRUSTSTAND_CSV_VERSION);
+    f.printf("# Test Date      : %s, %s\n", testContext.startTimeISO.c_str(), testContext.timezone.c_str());
     f.printf("# Motor Type     : %s\n", testContext.motorType.c_str());
     f.printf("# ESC Type       : %s\n", testContext.escType.c_str());
     f.printf("# Propeller Type : %s\n", testContext.propellerType.c_str());
@@ -281,7 +281,7 @@ bool TestDataRecorder::exportStatisticsCsv(const char *path,
         printStats(f, d.throttle, 1, decimalSep, fieldSep);
         f.print(fieldSep);
 
-        printStats(f, d.thrust, 3, decimalSep, fieldSep);
+        printStats(f, d.thrust, 0, decimalSep, fieldSep);
         f.print(fieldSep);
         printStats(f, d.torque, 3, decimalSep, fieldSep);
         f.print(fieldSep);
@@ -350,7 +350,7 @@ bool TestDataRecorder::exportMeanCsv(const char *path,
         f.print(fieldSep);
         printFloat(f, d.throttle.mean, 1, decimalSep);
         f.print(fieldSep);
-        printFloat(f, d.thrust.mean, 3, decimalSep);
+        printFloat(f, d.thrust.mean, 0, decimalSep);
         f.print(fieldSep);
         printFloat(f, d.torque.mean, 3, decimalSep);
         f.print(fieldSep);

@@ -3,17 +3,18 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+#include <memory>
 #include "actuators/MotorESC.h"
 #include <esp_log.h>
 #include "driver/ledc.h"
-#include <esp_log.h>
 
 static const char *TAG = "MotorESC";
 
-MotorESC::MotorESC(EscSignalDriver *driver)
-    : BaseActuator(TAG), _driver(driver)
+MotorESC::MotorESC(uint8_t escPin)
+    : BaseActuator(TAG), _driver(nullptr)
 {
-    _escState = EscState::DISARMED;
+    _escPin = escPin;
+    _mountState = MountState::DISARMED;
     _currentThrottle = 0.0f;
     _targetThrottle = 0.0f;
     _smoothingActive = false;
@@ -22,7 +23,7 @@ MotorESC::MotorESC(EscSignalDriver *driver)
 bool MotorESC::begin()
 {
     setState(ActuatorState::ACTU_INITIALIZING);
-    _escState = EscState::DISARMED;
+    _mountState = MountState::DISARMED;
 
     if (!_driver)
     {
@@ -31,42 +32,55 @@ bool MotorESC::begin()
         return false;
     }
 
-    if (!_driver->begin())
+    bool retState = disarm(true);
+    setState(ActuatorState::ACTU_STOPPED);
+
+    ESP_LOGI(TAG, "ESC ready using driver %p", _driver.get());
+
+    return true;
+}
+
+bool MotorESC::arm(uint16_t armTimeMs)
+{
+    if (!isReady() || _mountState != MountState::DISARMED)
+        return false;
+
+    ESP_LOGI(TAG, "Starting ESC arming sequence (%u ms)", armTimeMs);
+
+    if (!_driver->init())
     {
         setState(ActuatorState::ACTU_ERROR);
         ESP_LOGE(TAG, "ESC driver initialization failed");
         return false;
     }
 
-    forceStopHardware();
-    setState(ActuatorState::ACTU_STOPPED);
-
-    ESP_LOGI(TAG, "ESC ready using driver %p", _driver);
-    return true;
-}
-
-bool MotorESC::arm(uint16_t armTimeMs)
-{
-    if (!isReady() || _escState != EscState::DISARMED)
-        return false;
-
-    ESP_LOGI(TAG, "Starting ESC arming sequence (%u ms)", armTimeMs);
-
-    _driver->writeStop(); // hold min throttle
+    _driver->writeIdle(); // hold min throttle
     _armStartTime = millis();
     _armDuration = armTimeMs;
-    _escState = EscState::ARMING;
+    _mountState = MountState::ARMING;
 
     return true;
 }
 
-bool MotorESC::disarm()
+bool MotorESC::disarm(bool forceFlag)
 {
-    if (!isReady() || _escState != EscState::ARMED)
+    if ((!isReady() || _mountState != MountState::ARMED) && !forceFlag)
         return false;
 
-    forceStopHardware();
+    if (_driver)
+    {
+        _driver->writeIdle();
+    }
+    resetThrottleValues();
+    _mountState = MountState::DISARMED;
     return true;
+}
+
+void MotorESC::resetThrottleValues()
+{
+    _currentThrottle = 0.0f;
+    _targetThrottle = 0.0f;
+    _smoothingActive = false;
 }
 
 bool MotorESC::update()
@@ -77,18 +91,18 @@ bool MotorESC::update()
     unsigned long now = millis();
 
     // ---------- ARMING ----------
-    if (_escState == EscState::ARMING)
+    if (_mountState == MountState::ARMING)
     {
         if (now - _armStartTime >= _armDuration)
         {
-            _escState = EscState::ARMED;
+            _mountState = MountState::ARMED;
             ESP_LOGI(TAG, "ESC armed");
         }
         return true;
     }
 
     // ---------- SMOOTHING ----------
-    if (!_smoothingActive || _escState == EscState::DISARMED)
+    if (!_smoothingActive || _mountState == MountState::DISARMED)
         return false;
 
     float progress = (float)(now - _stateStartTime) / _transitionTimeMs;
@@ -100,12 +114,12 @@ bool MotorESC::update()
 
         if (_targetThrottle <= 0.0f)
         {
-            _escState = EscState::ARMED;
+            _mountState = MountState::ARMED;
             setState(ActuatorState::ACTU_STOPPED);
         }
         else
         {
-            _escState = EscState::RUNNING;
+            _mountState = MountState::RUNNING;
             setState(ActuatorState::ACTU_ACTIVE);
         }
 
@@ -120,7 +134,7 @@ bool MotorESC::update()
 
 float MotorESC::setThrottle(float throttlePercent, bool smooth, unsigned long transitionTimeMs)
 {
-    if (!canActuate() || (_escState != EscState::ARMED && _escState != EscState::RUNNING))
+    if (!canActuate() || (_mountState != MountState::ARMED && _mountState != MountState::RUNNING))
         return 0.0f;
 
     if (smooth)
@@ -131,8 +145,8 @@ float MotorESC::setThrottle(float throttlePercent, bool smooth, unsigned long tr
         _stateStartTime = millis();
         _smoothingActive = true;
 
-        if (throttlePercent > 0)
-            _escState = EscState::RUNNING;
+        if (throttlePercent > 0.)
+            _mountState = MountState::RUNNING;
 
         setState(ActuatorState::ACTU_ACTIVE);
         return _targetThrottle;
@@ -141,7 +155,7 @@ float MotorESC::setThrottle(float throttlePercent, bool smooth, unsigned long tr
     updateThrottle(throttlePercent);
 
     _targetThrottle = throttlePercent;
-    _escState = (throttlePercent > 0.f) ? EscState::RUNNING : EscState::ARMED;
+    _mountState = (throttlePercent > 0.f) ? MountState::RUNNING : MountState::ARMED;
 
     setState(throttlePercent > 0.f ? ActuatorState::ACTU_ACTIVE : ActuatorState::ACTU_STOPPED);
 
@@ -157,27 +171,19 @@ void MotorESC::updateThrottle(float throttlePercent)
 
 void MotorESC::stop()
 {
-    forceStopHardware();
-    _escState = EscState::DISARMED;
+    bool retState = disarm(true);
     setState(ActuatorState::ACTU_STOPPED);
 }
 
 void MotorESC::stopWithError()
 {
-    forceStopHardware();
-    _escState = EscState::DISARMED;
+    bool retState = disarm(true);
     setState(ActuatorState::ACTU_ERROR);
 }
 
 void MotorESC::forceStopHardware()
 {
-    if (_driver)
-        _driver->writeStop();
-
-    _currentThrottle = 0.0f;
-    _targetThrottle = 0.0f;
-    _smoothingActive = false;
-    _escState = EscState::DISARMED;
+    bool retState = disarm(true);
 }
 
 bool MotorESC::isAtTargetSpeed(float tolerancePercent) const
@@ -185,45 +191,99 @@ bool MotorESC::isAtTargetSpeed(float tolerancePercent) const
     return fabs(_currentThrottle - _targetThrottle) <= tolerancePercent;
 }
 
-bool MotorESC::setPulseRangeUs(uint16_t minUs, uint16_t maxUs)
+bool MotorESC::setDriverConfig(ESCConfig &driverConfig)
 {
     if (!_driver)
         return false;
-
     if (getState() == ActuatorState::ACTU_ACTIVE)
         return false;
 
-    return _driver->setPulseRangeUs(minUs, maxUs);
+    _driverConfig = driverConfig;
+    return _driver->setConfig(_driverConfig);
 }
 
-bool MotorESC::setDriver(EscSignalDriver *driver)
+bool MotorESC::setDriver(EscDriverType type)
 {
-    if (!driver)
+    if (_escDriverType == type)
+        return true;
+
+    if (_mountState != MountState::DISARMED)
         return false;
 
-    // Stop the old driver if it exists
+    stop(); // ensure ESC is not actively driving
+
+    vTaskDelay(1);
+
+    // --- Deinit old driver ---
     if (_driver)
-        _driver->stop();
+    {
+        _driver->writeIdle(); // safe state first
+        _driver->deinit();
+        _driver.reset();
+    }
 
-    // Assign the new driver
-    _driver = driver;
+    // --- Handle NONE ---
+    if (type == EscDriverType::ESC_DRIVER_NONE)
+    {
+        _escDriverType = type;
+        return true;
+    }
 
-    // Reset ESC state and throttle
-    _escState = EscState::DISARMED;
-    _currentThrottle = 0.0f;
-    _targetThrottle = 0.0f;
-    _smoothingActive = false;
+    // --- Create new driver ---
+    std::unique_ptr<EscSignalDriver> driver;
 
-    // Ensure hardware output is clean
-    _driver->writeStop();
+    switch (type)
+    {
+    case EscDriverType::ESC_DRIVER_PWM:
+        driver = std::unique_ptr<EscSignalDriver>(new PwmEscDriver(_escPin, 50, 13, 1));
+        break;
+
+    case EscDriverType::ESC_DRIVER_DSHOT300:
+    case EscDriverType::ESC_DRIVER_DSHOT600:
+    case EscDriverType::ESC_DRIVER_DSHOT1200:
+    {
+        DShotEscDriver::DShotRate rate;
+
+        switch (type)
+        {
+        case EscDriverType::ESC_DRIVER_DSHOT600:
+            rate = DShotEscDriver::DShotRate::DSHOT600;
+            break;
+        case EscDriverType::ESC_DRIVER_DSHOT1200:
+            rate = DShotEscDriver::DShotRate::DSHOT1200;
+            break;
+        default:
+            rate = DShotEscDriver::DShotRate::DSHOT300;
+            break;
+        }
+
+        driver = std::unique_ptr<EscSignalDriver>(new DShotEscDriver(_escPin, rate));
+        // needSignalRefreshTask = true;
+        break;
+    }
+
+    default:
+
+        return false;
+    }
+
+    if (!driver)
+    {
+        return false;
+    }
+
+    // --- Activate new driver ---
+    _driver = std::move(driver);
+
+    if (!_driver->init())
+    {
+        _driver.reset();
+        return false;
+    }
+    _driver->setConfig(_driverConfig);
+
+    _driver->writeIdle();
+    _escDriverType = type;
+
     return true;
-}
-
-void MotorESC::updateEsc()
-{
-    if (!_driver)
-        return;
-
-    if (isReady())
-        _driver->update();
 }

@@ -3,11 +3,23 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "core/Config.h"
 
 #ifndef SAFETY_LIMITS_H
 #define SAFETY_LIMITS_H
 
+#include "core/Config.h"
+
+/**
+ * @enum BatteryPreset
+ * @brief Predefined battery configurations based on LiPo cell count.
+ *
+ * Used to configure expected voltage ranges and simplify user selection.
+ * The numeric value corresponds to the number of LiPo cells (S).
+ *
+ * @note
+ * BATTERY_PRESET_NONE is typically used for calibration or when
+ * no battery-based limits should be applied.
+ */
 enum class BatteryPreset : uint8_t
 {
     BATTERY_PRESET_NONE = 0,
@@ -20,6 +32,7 @@ enum class BatteryPreset : uint8_t
 /**
  * @brief Convert battery preset to human-readable label.
  *
+ * @param preset Battery preset
  * @return Constant string, never null.
  */
 inline const char *batteryPresetToString(BatteryPreset preset)
@@ -42,19 +55,27 @@ inline const char *batteryPresetToString(BatteryPreset preset)
 }
 
 /**
- * @brief Aggregated safety and operational limits of the thrust stand.
+ * @struct SafetyLimits
+ * @brief Configurable safety limits for electrical and mechanical parameters.
  *
- * Defines absolute upper bounds for critical electrical and mechanical
- * parameters. These limits are enforced by the thrust stand controller
- * to protect hardware and ensure safe operation.
+ * Defines upper and lower bounds for monitored values such as current,
+ * voltage, thrust, and temperature. These limits are evaluated by the
+ * safety system and may trigger a safety trip if exceeded.
  *
- * A limit value of zero or less may be interpreted as "disabled"
- * depending on the specific parameter and implementation.
+ * @section limits_behavior Limit Behavior
+ * - Limits are interpreted as absolute thresholds
+ * - A value ≤ 0 may disable the corresponding limit (implementation-dependent)
+ * - Limits may be applied independently or in combination
  *
- * This structure contains configuration data only and does not
- * represent measured state or control logic.
+ * @section limits_scope Scope
+ * - coreLimits: Always active (hardware protection)
+ * - testLimits: Optional limits for experiment/test scenarios
+ *
+ * @note
+ * This structure contains configuration only. It does not perform validation
+ * or enforcement by itself.
  */
-typedef struct
+struct SafetyLimits
 {
     float maxCurrentA = CURRENT_SENSOR_MAX;         ///< Maximum allowed motor current [A]
     float maxThrottlePercent = 100.f;               ///< Maximum allowed throttle [%]
@@ -63,8 +84,14 @@ typedef struct
     float maxThrustGF = THRUST_SENSOR_MAX;          ///< Maximum allowed thrust [gf]
     float maxTemperatureC = TEMPERATURE_SENSOR_MAX; ///< Maximum allowed Motor Temperature [°C]
     BatteryPreset batteryPreset = BatteryPreset::BATTERY_PRESET_NONE;
-} SafetyLimits;
+};
 
+/**
+ * @brief Convert LiPo cell count to BatteryPreset.
+ *
+ * @param cells Number of cells (2–6 supported)
+ * @return Corresponding preset or BATTERY_PRESET_NONE if invalid
+ */
 constexpr inline BatteryPreset cellsToPreset(uint8_t cells)
 {
     return (cells >= 2 && cells <= 6)
@@ -72,20 +99,52 @@ constexpr inline BatteryPreset cellsToPreset(uint8_t cells)
                : BatteryPreset::BATTERY_PRESET_NONE;
 }
 
+/**
+ * @brief Convert BatteryPreset to cell count.
+ *
+ * @param preset Battery preset
+ * @return Number of cells (0 if NONE)
+ */
 constexpr inline uint8_t batteryPresetToCells(BatteryPreset preset)
 {
     return static_cast<uint8_t>(preset);
 }
 
 /**
- * @brief Identifies the primary cause of a safety trip condition.
+ * @enum SafetyTripReason
+ * @brief High-level causes of safety shutdown conditions.
  *
- * Enumerates all protection and supervision conditions that may
- * trigger a safety-related shutdown of the thrust stand.
+ * Represents the primary reason why the system entered a safety trip state.
+ * Used for diagnostics, logging, and user feedback.
  *
- * The listed reasons represent high-level fault categories and are
- * intended for diagnostics, logging, and user feedback. Detailed
- * sensor data should be captured separately if required.
+ * @section trip_categories Categories
+ *
+ * Electrical limits:
+ * - OVER_CURRENT
+ * - OVER_VOLTAGE
+ * - UNDER_VOLTAGE
+ *
+ * Mechanical limits:
+ * - OVER_THRUST
+ * - OVER_TEMPERATURE
+ *
+ * System faults:
+ * - SENSOR_FAILURE
+ * - ACTUATOR_FAILURE
+ * - CONTROL_FAULT
+ *
+ * External / user events:
+ * - USER_ABORT
+ * - PROP_CAGE_OPEN
+ * - ESTOP
+ * - PASSTHROUGH
+ *
+ * Control violations:
+ * - OVER_THROTTLE
+ *
+ * @note
+ * Only the primary cause is stored. Additional diagnostic data should
+ * be logged separately if needed.
  */
 enum class SafetyTripReason : uint8_t
 {
@@ -104,11 +163,18 @@ enum class SafetyTripReason : uint8_t
     SAFETY_TRIP_USER_ABORT,     ///< User-initiated abort, TO BE IMPLEMENTED
     SAFETY_TRIP_PROP_CAGE_OPEN, ///< External interlock triggered, e.g propeller cage open
 
-    SAFETY_TRIP_ESTOP, ///< EStop Button triggered
+    SAFETY_TRIP_ESTOP,       ///< EStop Button triggered
+    SAFETY_TRIP_PASSTHROUGH, ///< Entering Passthrough Mode, similiar to pressing EStop Button
 
     SAFETY_TRIP_OVER_THROTTLE ///< requested throttle exceeded configured limit
 };
 
+/**
+ * @brief Convert SafetyTripReason to human-readable string.
+ *
+ * @param reason Trip reason
+ * @return Constant string, never null.
+ */
 inline const char *safetyTripReasonToString(SafetyTripReason reason)
 {
     switch (reason)
@@ -137,6 +203,8 @@ inline const char *safetyTripReasonToString(SafetyTripReason reason)
         return "Prop Cage Open";
     case SafetyTripReason::SAFETY_TRIP_ESTOP:
         return "E-Stop";
+    case SafetyTripReason::SAFETY_TRIP_PASSTHROUGH:
+        return "Passthrough Mode";
     case SafetyTripReason::SAFETY_TRIP_OVER_THROTTLE:
         return "Over Throttle";
     default:
@@ -144,6 +212,14 @@ inline const char *safetyTripReasonToString(SafetyTripReason reason)
     }
 }
 
+/**
+ * @enum SafetyTripSource
+ * @brief Origin of the applied safety limit.
+ *
+ * Distinguishes whether a trip was caused by:
+ * - Core safety limits (hardware protection)
+ * - Test-specific limits (user-defined constraints)
+ */
 enum class SafetyTripSource
 {
     CORE_LIMIT,
@@ -151,6 +227,9 @@ enum class SafetyTripSource
     NONE
 };
 
+/**
+ * @brief Convert SafetyTripSource to human-readable string.
+ */
 inline const char *safetyTripSourceToString(SafetyTripSource source)
 {
     switch (source)
@@ -167,13 +246,21 @@ inline const char *safetyTripSourceToString(SafetyTripSource source)
 }
 
 /**
- * @brief Aggregated safety status of the thrust stand.
+ * @struct SafetyState
+ * @brief Current safety supervision status.
  *
- * Represents the current safety supervision status of the system.
- * A safety trip indicates that an operational limit or protection
- * condition has been violated.
+ * Represents whether a safety trip has occurred and provides
+ * diagnostic information about the event.
+ *
+ * @section behavior Behavior
+ * - tripped == true indicates system is in a faulted state
+ * - reason identifies the primary cause
+ * - tripValue stores the measured value at violation
+ *
+ * @note
+ * Values are only meaningful when tripped == true.
  */
-typedef struct
+struct SafetyState
 {
     bool tripped = false; ///< Indicates an active safety trip condition
 
@@ -195,9 +282,25 @@ typedef struct
      */
     SafetyTripReason reason = SafetyTripReason::SAFETY_TRIP_NONE;
     SafetyTripSource source = SafetyTripSource::NONE;
+};
 
-} SafetyState;
-
+/**
+ * @struct ThrustStandSafety
+ * @brief Aggregated safety configuration and runtime state.
+ *
+ * Combines:
+ * - Core safety limits (always enforced)
+ * - Test-specific limits (optional constraints)
+ * - Current safety state
+ *
+ * @section usage Usage
+ * - coreLimits protect hardware
+ * - testLimits restrict experiments
+ * - state reflects current system safety condition
+ *
+ * @note
+ * Evaluation logic is implemented elsewhere (not in this structure).
+ */
 struct ThrustStandSafety
 {
     SafetyLimits coreLimits; ///< Configured core safety limits

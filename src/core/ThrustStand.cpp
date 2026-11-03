@@ -28,112 +28,32 @@ ThrustStand::ThrustStand()
       _currentSensor(),
       _voltageSensor(),
       _hwEstop(ESTOP_PIN),
-      _pwmDriver(new PwmEscDriver(MOTOR_ESC_PIN, 50, 13, 1)),
-      _motor(_pwmDriver) // pass driver directly
+      _motor(MOTOR_ESC_PIN) // pass driver directly
 
 {
     // other members can be initialized here
-    _escDriverType = EscDriverType::ESC_DRIVER_PWM;
 }
 
 ThrustStand::~ThrustStand()
 {
     _motor.stop(); // ensure motor is stopped
-    delete _pwmDriver;
-    delete _dshotDriver;
 }
 
-bool ThrustStand::switchDriver(EscDriverType type)
+bool ThrustStand::setESCDriver(EscDriverType type)
 {
-    // No-op if already active
-    if (_escDriverType == type)
+    if (_motor.getDriverType() == type)
         return true;
 
-    // Always stop motor before switching signal protocol
-    _motor.stop();
+    ESP_LOGI(TAG, "Setting ESC driver to %s ...", escDriverToString(type));
 
-    EscSignalDriver *newDriver = nullptr;
-
-    switch (type)
+    if (!_motor.setDriver(type))
     {
-    case EscDriverType::ESC_DRIVER_PWM:
-    {
-        if (!_pwmDriver)
-        {
-            _pwmDriver = new PwmEscDriver(
-                MOTOR_ESC_PIN,
-                50, // Hz
-                13, // resolution
-                1   // LEDC channel
-            );
-        }
-
-        newDriver = _pwmDriver;
-        break;
-    }
-
-    case EscDriverType::ESC_DRIVER_DSHOT150:
-    case EscDriverType::ESC_DRIVER_DSHOT300:
-    case EscDriverType::ESC_DRIVER_DSHOT600:
-    {
-        if (!_dshotDriver)
-        {
-            _dshotDriver = new DShotEscDriver(
-                MOTOR_ESC_PIN,
-                DShotEscDriver::DShotRate::DSHOT300 // temporary default
-            );
-        }
-
-        // Map EscDriverType → DShotRate
-        DShotEscDriver::DShotRate rate;
-        switch (type)
-        {
-        case EscDriverType::ESC_DRIVER_DSHOT150:
-            rate = DShotEscDriver::DShotRate::DSHOT150;
-            break;
-        case EscDriverType::ESC_DRIVER_DSHOT600:
-            rate = DShotEscDriver::DShotRate::DSHOT600;
-            break;
-        case EscDriverType::ESC_DRIVER_DSHOT300:
-        default:
-            rate = DShotEscDriver::DShotRate::DSHOT300;
-            break;
-        }
-
-        if (!_dshotDriver->setRate(rate))
-        {
-            ESP_LOGE(TAG, "Failed to set DShot rate");
-            return false;
-        }
-
-        newDriver = _dshotDriver;
-        break;
-    }
-
-    case EscDriverType::ESC_DRIVER_NONE:
-    default:
-        ESP_LOGW(TAG, "ESC driver NONE selected");
-        _escDriverType = EscDriverType::ESC_DRIVER_NONE;
-        return true;
-    }
-
-    if (!newDriver)
-        return false;
-
-    // Bind new driver to MotorESC
-    _motor.setDriver(newDriver);
-
-    // Initialize hardware for new protocol
-    if (!_motor.begin())
-    {
-        ESP_LOGE(TAG, "MotorESC begin() failed after driver switch");
+        ESP_LOGE(TAG, "MotorESC failed to set driver to %s", escDriverToString(type));
         return false;
     }
-
     _escDriverType = type;
     saveConfig();
 
-    ESP_LOGI(TAG, "ESC driver switched to %s", escDriverToString(type));
     return true;
 }
 
@@ -147,19 +67,16 @@ bool ThrustStand::init()
 
     if (!init_sensors())
     {
-
         return false;
     }
 
-    if (!switchDriver(_escDriverType))
+    if (!setESCDriver(_escDriverType))
     {
-
         return false;
     }
 
     if (!_motor.begin())
     {
-
         return false;
     };
 
@@ -236,7 +153,7 @@ bool ThrustStand::init_sensors(bool force)
             ESP_LOGI(TAG, "# INA226 Current Sensor initialized.");
         }
             */
-    if (CURRENT_SENSOR_INSTALLED && (_currentSensor.getState() == SensorState::SENSOR_UNINITIALIZED) || force)
+    if (CURRENT_SENSOR_INSTALLED && (_currentSensor.getState() == SensorState::SENSOR_UNINITIALIZED || force))
     {
         if (!_currentSensor.begin(CURRENT_SENSOR_PIN))
         {
@@ -248,7 +165,7 @@ bool ThrustStand::init_sensors(bool force)
         _currentSensor.tare();
     }
 
-    if ((TEMPERATURE_SENSOR_TYPE > TEMP_SENSOR_NONE) && (_tempSensor.getState() == SensorState::SENSOR_UNINITIALIZED) || force)
+    if ((TEMPERATURE_SENSOR_TYPE > TEMP_SENSOR_NONE) && (_tempSensor.getState() == SensorState::SENSOR_UNINITIALIZED || force))
     {
 
         if (!_tempSensor.begin())
@@ -257,10 +174,12 @@ bool ThrustStand::init_sensors(bool force)
         }
     }
 
-    if (RPM_SENSOR_INSTALLED && ((_rpmSensor.getState() == SensorState::SENSOR_UNINITIALIZED || force)))
+    if (RPM_SENSOR_INSTALLED && (_rpmSensor.getState() == SensorState::SENSOR_UNINITIALIZED || force))
     {
-        RpmSensorConfig rpm_config;
-        if (!_rpmSensor.begin(RPM_SENSOR_PIN, rpm_config))
+        if (force)
+            _rpmSensor.deinit();
+
+        if (!_rpmSensor.begin(RPM_SENSOR_PIN, _rpmUIConfig))
         {
             initialize = false;
         }
@@ -374,7 +293,41 @@ bool ThrustStand::update()
     // 6. Status indication
     _statusLed.update();
 
+    // 7. check state change for publishing event (Web Server is listening)
+    checkStateChanges();
+
     return ok;
+}
+
+void ThrustStand::checkStateChanges()
+{
+
+    uint16_t changeMask = 0;
+    const uint32_t now = millis();
+
+    if (_state.motorMountState != _lastState.motorMountState)
+        changeMask |= ThrustStandEvents::StateChangeBits::CHANGE_MOTOR_MOUNT;
+    if (_state.motor != _lastState.motor)
+        changeMask |= ThrustStandEvents::StateChangeBits::CHANGE_MOTOR_STATE;
+    if (_state.rpmSensor != _lastState.rpmSensor)
+        changeMask |= ThrustStandEvents::StateChangeBits::CHANGE_RPM_SENSOR;
+    if (_state.tempSensor != _lastState.tempSensor)
+        changeMask |= ThrustStandEvents::StateChangeBits::CHANGE_TEMP_SENSOR;
+    if (_state.thrustSensor != _lastState.thrustSensor)
+        changeMask |= ThrustStandEvents::StateChangeBits::CHANGE_TRUST_SENSOR;
+    if (_state.torqueSensor != _lastState.torqueSensor)
+        changeMask |= ThrustStandEvents::StateChangeBits::CHANGE_TORQUE_SENSOR;
+    if (_state.currentSensor != _lastState.currentSensor)
+        changeMask |= ThrustStandEvents::StateChangeBits::CHANGE_CURRENT_SENSOR;
+    if (_state.voltageSensor != _lastState.voltageSensor)
+        changeMask |= ThrustStandEvents::StateChangeBits::CHANGE_VOLTAGE_SENSOR;
+
+    if (changeMask)
+        EventBus::instance()
+            .publish(Event{EventType::SYSTEM_STATE_CHANGE, changeMask,
+                           now});
+
+    _lastState = _state;
 }
 
 void ThrustStand::updateIdleActivity()
@@ -397,7 +350,7 @@ void ThrustStand::checkAutoDisarmOnIdle()
     if (_state.controlMode != ThrottleControlMode::MANUAL)
         return;
 
-    if (!(_state.motorMountState == MotorESC::EscState::ARMED))
+    if (!(_state.motorMountState == MotorESC::MountState::ARMED))
         return;
 
     if (_motor.getCurrentThrottle() > 0.0f)
@@ -465,7 +418,7 @@ float ThrustStand::setThrottle(float throttle,
     return (_currentDataSet.throttle_cmd);
 }
 
-float ThrustStand::getThrustCalFactor()
+float ThrustStand::getThrustCalFactor() const
 {
     return _thrustSensor.getCalibration();
 }
@@ -482,9 +435,20 @@ void ThrustStand::setTorqueCalibration(float cal1, float cal2, float distance)
     saveConfig();
 }
 
-TorqueSensor::Calibration ThrustStand::getTorqueCalibration()
+TorqueSensor::Calibration ThrustStand::getTorqueCalibration() const
 {
     return (_torqueSensor.getCalibration());
+}
+
+void ThrustStand::setTemperatueCalibration(float coefficient, float offset)
+{
+    _tempSensor.setCalibration(coefficient, offset);
+    saveConfig();
+}
+
+BaseTemperatureSensor::Calibration ThrustStand::getTemperatureCalibration() const
+{
+    return (_tempSensor.getCalibration());
 }
 
 void ThrustStand::setCurrentSensitivity(float voltsPerAmp)
@@ -493,9 +457,9 @@ void ThrustStand::setCurrentSensitivity(float voltsPerAmp)
     saveConfig();
 }
 
-bool ThrustStand::setPulseRangeUs(uint16_t minPulseUs, uint16_t maxPulseUs)
+bool ThrustStand::setESCDriverConfig(ESCConfig &escConfig)
 {
-    bool updateFlag = _motor.setPulseRangeUs(minPulseUs, maxPulseUs);
+    bool updateFlag = _motor.setDriverConfig(escConfig);
     if (updateFlag)
         saveConfig();
 
@@ -505,6 +469,15 @@ bool ThrustStand::setPulseRangeUs(uint16_t minPulseUs, uint16_t maxPulseUs)
 bool ThrustStand::setVoltageCalibrationFactor(float calibrationFactor)
 {
     bool updateFlag = _voltageSensor.setCalibrationFactor(calibrationFactor);
+    if (updateFlag)
+        saveConfig();
+
+    return updateFlag;
+}
+
+bool ThrustStand::setRPMUICalibration(const RpmUiConfig &rpmUIConfig)
+{
+    bool updateFlag = _rpmSensor.setUIConfig(rpmUIConfig);
     if (updateFlag)
         saveConfig();
 
@@ -799,6 +772,7 @@ ActuatorState ThrustStand::mapTripToState(SafetyTripReason reason)
         return ActuatorState::ACTU_READY;
 
     case SafetyTripReason::SAFETY_TRIP_ESTOP:
+    case SafetyTripReason::SAFETY_TRIP_PASSTHROUGH:
     case SafetyTripReason::SAFETY_TRIP_PROP_CAGE_OPEN:
         return ActuatorState::ACTU_E_STOP;
 
@@ -843,7 +817,7 @@ void ThrustStand::triggerSafetyTrip(SafetyTripSource source, SafetyTripReason re
         break;
 
     case ActuatorState::ACTU_E_STOP:
-        _motor.emergencyStop("Safety limit violated");
+        _motor.emergencyStop(safetyTripReasonToString(reason));
         break;
 
     default:
@@ -865,7 +839,16 @@ void ThrustStand::clearSafetyTrip()
 
     if (!isSafeToArm())
     {
-        ESP_LOGI(TAG, "isSafeToArm is set to false - not clearance");
+        ESP_LOGI(TAG, "isSafeToArm is set to false - no clearance");
+        return;
+    }
+
+    if (_systemMode == SystemMode::ESC_PASSTHROUGH)
+    {
+        ESP_LOGI(TAG, "in Passthrough Mode - no clearance");
+        _safety.state.reason = SafetyTripReason::SAFETY_TRIP_PASSTHROUGH;
+        _safety.state.tripValue = 0.0f;
+        _safety.state.source = SafetyTripSource::CORE_LIMIT;
         return;
     }
 
@@ -914,6 +897,7 @@ void ThrustStand::loadConfig()
 
         _torqueSensor.setCalibration(cal1, cal2, dist);
     }
+
     /* ---------- Current ---------- */
     if (CURRENT_SENSOR_INSTALLED)
     {
@@ -938,15 +922,31 @@ void ThrustStand::loadConfig()
         float volt_calib = prefs.getFloat("volt_calib", 1.);
         _voltageSensor.setCalibrationFactor(volt_calib);
     }
+    /* ---------- Temperature ---------- */
+
+    if (!prefs.isKey("temp_coeff"))
+        prefs.putFloat("temp_coeff", 1.f);
+    if (!prefs.isKey("temp_offset"))
+        prefs.putFloat("temp_offset", 0.f);
+
+    float coefficient = prefs.getFloat("temp_coeff", 1.f);
+    float offset = prefs.getFloat("temp_offset", 0.f);
+
+    _tempSensor.setCalibration(coefficient, offset);
 
     /* ----------Motor ---------- */
     if (!prefs.isKey("minPulseUs"))
         prefs.putUInt("minPulseUs", 1000);
     if (!prefs.isKey("maxPulseUs"))
         prefs.putUInt("maxPulseUs", 2000);
-    uint16_t minPulseUs = prefs.getUInt("minPulseUs");
-    uint16_t maxPulseUs = prefs.getUInt("maxPulseUs");
-    _motor.setPulseRangeUs(minPulseUs, maxPulseUs);
+    if (!prefs.isKey("minSpinPCT"))
+        prefs.putUInt("minSpinPCT", 0);
+    ESCConfig escConfig;
+    escConfig.minPulseUs = prefs.getUInt("minPulseUs");
+    escConfig.maxPulseUs = prefs.getUInt("maxPulseUs");
+
+    escConfig.minSpinPercentage = prefs.getUInt("minSpinPCT");
+    _motor.setDriverConfig(escConfig);
 
     if (!prefs.isKey("autoDisarmMs"))
         prefs.putUInt("autoDisarmMs", _autoDisarmMs);
@@ -1021,10 +1021,18 @@ void ThrustStand::saveConfig()
         prefs.putFloat("rBottom", _voltageSensor.getBottomResistor());
         prefs.putFloat("volt_calib", _voltageSensor.getCalibrationFactor());
     }
+    /* ---------- Temperature ---------- */
+
+    auto tempCal = _tempSensor.getCalibration();
+
+    prefs.putFloat("temp_coeff", tempCal.coefficient);
+    prefs.putFloat("temp_offset", tempCal.offset);
 
     /* ----------Motor ---------- */
-    prefs.putUInt("minPulseUs", _motor.getMinPulseUs());
-    prefs.putUInt("maxPulseUs", _motor.getMaxPulseUs());
+    auto escConfig = _motor.getDriverConfig();
+    prefs.putUInt("minPulseUs", escConfig.minPulseUs);
+    prefs.putUInt("maxPulseUs", escConfig.maxPulseUs);
+    prefs.putUInt("minSpinPCT", escConfig.minSpinPercentage);
 
     prefs.putUInt("escDriverType", static_cast<uint8_t>(_escDriverType));
 
@@ -1196,6 +1204,41 @@ bool ThrustStand::updateDerivedSensorData()
     return true;
 }
 
+bool ThrustStand::enterEscPassthrough()
+{
+    if (_systemMode == SystemMode::ESC_PASSTHROUGH)
+        return true;
+
+    triggerSafetyTrip(SafetyTripSource::CORE_LIMIT, SafetyTripReason::SAFETY_TRIP_PASSTHROUGH, 0.);
+    bool retSetDriver = _motor.setDriver(EscDriverType::ESC_DRIVER_NONE);
+    if (!retSetDriver)
+    {
+
+        ESP_LOGE(TAG, "Setting ESC driver to %s not successful, cannot enter EscPassthrough", escDriverToString(EscDriverType::ESC_DRIVER_NONE));
+        return false;
+    }
+    update(); // when ESC_PASSTHROUGH is active the update() is not called, and this is last chance to sync the status for webui
+
+    // configure GPIO for passthrough
+    EscPassthrough::begin(MOTOR_ESC_PIN);
+
+    _systemMode = SystemMode::ESC_PASSTHROUGH;
+
+    return true;
+}
+
+void ThrustStand::exitEscPassthrough()
+{
+    if (_systemMode != SystemMode::ESC_PASSTHROUGH)
+        return;
+
+    EscPassthrough::end();
+
+    _motor.setDriver(_escDriverType); // reactivate esc driver
+
+    _systemMode = SystemMode::NORMAL;
+}
+
 void ThrustStand::updateStatusLed()
 {
     const StatusLed::State newState = deriveLedState();
@@ -1227,168 +1270,4 @@ StatusLed::State ThrustStand::deriveLedState() const
 
     // 4 Normal idle
     return StatusLed::State::READY;
-}
-
-void ThrustStand::fillCalibrationJson(JsonDocument &doc)
-{
-    doc["version"] = THRUSTSTAND_APP_VERSION;
-
-    doc["thrust"]["cal"] = getThrustCalFactor();
-
-    auto torque = getTorqueCalibration();
-    doc["torque"]["cal1"] = torque.cal1;
-    doc["torque"]["cal2"] = torque.cal2;
-    doc["torque"]["distance_mm"] = torque.distanceMM;
-
-    doc["current"]["sensitivity"] = getCurrentSensitivity();
-    doc["voltage"]["calibration"] = getVoltageCalibrationFactor();
-
-    doc["motor"]["pwm_min_us"] = getMinPulseUs();
-    doc["motor"]["pwm_max_us"] = getMaxPulseUs();
-    //
-    doc["motor"]["disarm_timeout_s"] = _autoDisarmMs / 1000UL;
-    doc["motor"]["esc_driver_type"] = static_cast<uint8_t>(_escDriverType);
-}
-
-void ThrustStand::fillSystemStateJson(JsonDocument &doc) const
-{
-    const ThrustStandState s = getState();
-
-    doc["thrust"] = static_cast<uint8_t>(s.thrustSensor);
-    doc["torque"] = static_cast<uint8_t>(s.torqueSensor);
-    doc["temperature"] = static_cast<uint8_t>(s.tempSensor);
-    doc["rpm"] = static_cast<uint8_t>(s.rpmSensor);
-    doc["current"] = static_cast<uint8_t>(s.currentSensor);
-    doc["voltage"] = static_cast<uint8_t>(s.voltageSensor);
-    doc["motor"] = static_cast<uint8_t>(s.motor);
-    doc["motor_mount"] = static_cast<uint8_t>(s.motorMountState);
-}
-
-void ThrustStand::fillLiveSnapshot(JsonDocument &doc) const
-{
-    const test_data_t d = getCurrentDataSet();
-    const SafetyState safetyState = getSafetyState();
-
-    doc["throttle_cmd"] = d.throttle_cmd;
-    doc["throttle_act"] = d.throttle_act;
-    doc["thrust"] = d.thrust;
-    doc["torque"] = d.torque;
-    doc["torqueCell1"] = d.torque_cell_1;
-    doc["torqueCell2"] = d.torque_cell_2;
-
-    doc["voltage"] = d.voltage;
-    doc["current"] = d.current;
-
-    doc["power"] = d.power;
-    doc["thrust_ratio"] = d.thrust_ratio;
-
-    doc["rpm"] = d.rpm;
-    doc["temperature"] = d.temperature;
-
-    // Safety state
-    doc["safety_tripped"] = safetyState.tripped;
-    doc["safety_trip_value"] = safetyState.tripValue;
-    doc["safety_trip_reason"] =
-        safetyTripReasonToString(safetyState.reason);
-    doc["safety_trip_source"] = safetyTripSourceToString(safetyState.source);
-}
-
-void ThrustStand::fillSafetyJson(JsonDocument &doc) const
-{
-
-    // Limits
-    doc["limits"]["throttle_percent"] = _safety.coreLimits.maxThrottlePercent;
-    doc["limits"]["current_a"] = _safety.coreLimits.maxCurrentA;
-    doc["limits"]["voltage_max_v"] = _safety.coreLimits.maxVoltageV;
-    doc["limits"]["voltage_min_v"] = _safety.coreLimits.minVoltageV;
-    doc["limits"]["thrust_gf"] = _safety.coreLimits.maxThrustGF;
-    doc["limits"]["battery_cells"] = batteryPresetToCells(_safety.coreLimits.batteryPreset);
-    doc["limits"]["temperature_c"] = _safety.coreLimits.maxTemperatureC;
-}
-
-void ThrustStand::fillBatteryPresetJson(JsonDocument &doc) const
-{
-    JsonArray arr = doc.createNestedArray("presets");
-
-    auto addPreset = [&](BatteryPreset preset,
-                         const char *label,
-                         float minV,
-                         float maxV)
-    {
-        JsonObject obj = arr.createNestedObject();
-        const uint8_t cells = static_cast<uint8_t>(preset);
-
-        obj["id"] = cells;
-        obj["label"] = label;
-        obj["cells"] = cells;
-        obj["voltage_min_v"] = minV;
-        obj["voltage_max_v"] = maxV;
-    };
-
-    /* ---------- NONE / Calibration ---------- */
-    addPreset(
-        BatteryPreset::BATTERY_PRESET_NONE,
-        batteryPresetToString(BatteryPreset::BATTERY_PRESET_NONE),
-        -0.01f, // Slightly below zero to avoid noise-triggered trips when disabled
-        VOLTAGE_SENSOR_MAX);
-
-    /* ---------- LiPo presets ---------- */
-    addPreset(
-        BatteryPreset::BATTERY_PRESET_3S,
-        batteryPresetToString(BatteryPreset::BATTERY_PRESET_3S),
-        3 * 3.2f,
-        3 * 4.2f);
-
-    addPreset(
-        BatteryPreset::BATTERY_PRESET_4S,
-        batteryPresetToString(BatteryPreset::BATTERY_PRESET_4S),
-        4 * 3.2f,
-        4 * 4.2f);
-
-    addPreset(
-        BatteryPreset::BATTERY_PRESET_5S,
-        batteryPresetToString(BatteryPreset::BATTERY_PRESET_5S),
-        5 * 3.2f,
-        5 * 4.2f);
-
-    addPreset(
-        BatteryPreset::BATTERY_PRESET_6S,
-        batteryPresetToString(BatteryPreset::BATTERY_PRESET_6S),
-        6 * 3.2f,
-        6 * 4.2f);
-}
-
-void ThrustStand::fillESCDriverJson(JsonDocument &doc) const
-{
-    JsonArray arr = doc.createNestedArray("esc_drivers");
-
-    auto addDriver = [&](EscDriverType type, const char *label)
-    {
-        JsonObject obj = arr.createNestedObject();
-        obj["id"] = static_cast<uint8_t>(type);
-        obj["label"] = label;
-    };
-
-    // ---------- NONE ----------
-    addDriver(EscDriverType::ESC_DRIVER_NONE,
-              escDriverToString(EscDriverType::ESC_DRIVER_NONE));
-
-    // ---------- PWM ----------
-    addDriver(EscDriverType::ESC_DRIVER_PWM,
-              escDriverToString(EscDriverType::ESC_DRIVER_PWM));
-
-    // ---------- D-Shot variants ----------
-    addDriver(EscDriverType::ESC_DRIVER_DSHOT150,
-              escDriverToString(EscDriverType::ESC_DRIVER_DSHOT150));
-
-    addDriver(EscDriverType::ESC_DRIVER_DSHOT300,
-              escDriverToString(EscDriverType::ESC_DRIVER_DSHOT300));
-
-    addDriver(EscDriverType::ESC_DRIVER_DSHOT600,
-              escDriverToString(EscDriverType::ESC_DRIVER_DSHOT600));
-}
-
-void ThrustStand::updateEsc()
-{
-    _motor.updateEsc();
 }

@@ -7,38 +7,55 @@
 #include "protocol/TestProtocolParser.h"
 #include <ArduinoJson.h>
 
+void WebServerController::sendTestConfiguration(AsyncWebSocketClient *client)
+{
+    StaticJsonDocument<512> doc; // same size as used in
+    doc["type"] = MsgType::TEST_CONFIG;
+    ApiSerializer::writeTestConfig(doc, _executor->getRunContext());
+    sendJson(doc, client);
+}
+
+void WebServerController::sendTestState(AsyncWebSocketClient *client)
+{
+    StaticJsonDocument<512> doc; // same size as used in
+    doc["type"] = MsgType::TEST_STATE;
+    ApiSerializer::writeTestState(doc, _executor->getStatus());
+
+    sendJson(doc, client);
+}
+
 void WebServerController::setupTestRoutes()
 {
     //
     // ── GET /api/test/config
     //
-    server.on("/api/test/config", HTTP_GET,
-              [this](AsyncWebServerRequest *request)
-              {
-                  StaticJsonDocument<512> doc;
-                  _executor->fillConfigJson(doc);
+    // server.on("/api/test/config", HTTP_GET,
+    //           [this](AsyncWebServerRequest *request)
+    //           {
+    //               StaticJsonDocument<512> doc;
+    //               _executor->fillTestConfigJson(doc);
 
-                  AsyncResponseStream *response =
-                      request->beginResponseStream("application/json");
+    //               AsyncResponseStream *response =
+    //                   request->beginResponseStream("application/json");
 
-                  serializeJson(doc, *response);
-                  request->send(response);
-              });
+    //               serializeJson(doc, *response);
+    //               request->send(response);
+    //           });
     //
     // ── GET /api/test
     //
-    server.on("/api/test", HTTP_GET,
-              [this](AsyncWebServerRequest *request)
-              {
-                  StaticJsonDocument<512> doc;
-                  _executor->fillStatusJson(doc);
+    // server.on("/api/test", HTTP_GET,
+    //           [this](AsyncWebServerRequest *request)
+    //           {
+    //               StaticJsonDocument<512> doc;
+    //               _executor->fillTestStatusJson(doc);
 
-                  AsyncResponseStream *response =
-                      request->beginResponseStream("application/json");
+    //               AsyncResponseStream *response =
+    //                   request->beginResponseStream("application/json");
 
-                  serializeJson(doc, *response);
-                  request->send(response);
-              });
+    //               serializeJson(doc, *response);
+    //               request->send(response);
+    //           });
     //
     // ── PUT /api/test/config
     //
@@ -89,6 +106,15 @@ void WebServerController::setupTestRoutes()
             if (doc.containsKey("csvFormat"))
                 csvFmt = doc["csvFormat"];
 
+            const char *startTimeISO = nullptr;
+            const char *timezone = nullptr;
+
+            if (doc.containsKey("startTime"))
+                startTimeISO = doc["startTime"];
+
+            if (doc.containsKey("timezone"))
+                timezone = doc["timezone"];
+
             bool ok = _executor->setRunContext(
                 doc["motorType"] | ctx.motorType,
                 doc["escType"] | ctx.escType,
@@ -101,6 +127,8 @@ void WebServerController::setupTestRoutes()
                 static_cast<EscDriverType>(
                     doc["escDriverType"].as<uint8_t>() |
                     static_cast<uint8_t>(ctx.escDriverType)),
+                startTimeISO,
+                timezone,
                 csvFmt);
             if (!ok)
             {
@@ -110,6 +138,7 @@ void WebServerController::setupTestRoutes()
             }
 
             request->send(200, "application/json", "{\"status\":\"ok\"}");
+            sendTestConfiguration();
         });
     //
     // ── POST /api/test/start
@@ -183,17 +212,7 @@ void WebServerController::setupTestRoutes()
     server.on("/api/test/stop", HTTP_POST, [this](AsyncWebServerRequest *request)
               {
                 ESP_LOGI("WebServerController", "stopTest");
-        _executor->stop(ExecState::Aborted);
-        request->send(200, "text/plain", "OK"); });
-
-    // calculate simple checksum (optional)
-    // if (!doc.containsKey("checksum")) {
-    //     uint32_t sum = 0;
-    //     for (size_t i = 0; i < json.length(); ++i) sum += json[i];
-    //     doc["checksum"] = String(sum, HEX);
-    // }
-
-    // AsyncResponseStream *response = request->beginResponseStream("application/json");
-    // serializeJson(doc, *response);
-    // request->send(response); });
+        _executor->stop(ExecState::Aborted, true);
+        request->send(200, "text/plain", "OK");
+        sendTestState(); });
 }

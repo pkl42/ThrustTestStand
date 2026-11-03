@@ -5,7 +5,6 @@
  */
 
 #include "actuators/esc/DShotEscDriver.h"
-#include <driver/rmt.h>
 #include <esp_log.h>
 
 static const char *TAG = "DShotEscDriver";
@@ -20,7 +19,7 @@ DShotEscDriver::DShotEscDriver(uint8_t pin,
     _rmtChannel = RMT_CHANNEL_MAX; // marker for “not assigned yet”
 }
 
-bool DShotEscDriver::begin()
+bool DShotEscDriver::init()
 {
     if (_initialized)
     {
@@ -44,10 +43,10 @@ bool DShotEscDriver::begin()
         rmt_config_t config = {};
         config.rmt_mode = RMT_MODE_TX;
         config.channel = _rmtChannel;
-        config.gpio_num = static_cast<gpio_num_t>(_pin);
+        config.gpio_num = (gpio_num_t)_pin;
         config.clk_div = 1;
         config.mem_block_num = 1;
-        config.tx_config.loop_en = false;
+        config.tx_config.loop_en = true; // <--- Enable continuous looping
         config.tx_config.carrier_en = false;
         config.tx_config.idle_output_en = true;
         config.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
@@ -61,7 +60,7 @@ bool DShotEscDriver::begin()
         }
 
         // Attempt driver install
-        err = rmt_driver_install(_rmtChannel, 0, 0);
+        err = rmt_driver_install(_rmtChannel, 256, 0);
         if (err != ESP_OK)
         {
             ESP_LOGW(TAG, "rmt_driver_install() failed on channel %d: %s, trying next", _rmtChannel, esp_err_to_name(err));
@@ -84,35 +83,55 @@ bool DShotEscDriver::begin()
     }
 
     _initialized = true;
-    writeStop();
+    writeIdle();
     ESP_LOGI(TAG, "DShot ESC ready (rate=%u)", static_cast<uint16_t>(_rate));
+
+    rmt_write_items(_rmtChannel, _rmt_packet, 17, false);
+    // 3. FORCE START: Some ESP32 versions need an explicit start command
+    // to begin the loop if the first write was non-blocking.
+    rmt_tx_start(_rmtChannel, true);
+
+    return true;
+}
+
+bool DShotEscDriver::setConfig(ESCConfig &config)
+{
+    if (config.minPulseUs >= config.maxPulseUs)
+        return false;
+
+    if (config.minPulseUs < 800 || config.maxPulseUs > 2200)
+        return false;
+
+    if (config.minSpinPercentage < 0 || config.minSpinPercentage > 20)
+        return false;
+
+    _config = config;
+
+    writeIdle();
     return true;
 }
 
 void DShotEscDriver::writeThrottle(float percent)
 {
-    // Clamp percent [0–100]
+    if (!_initialized)
+        return;
+
     percent = constrain(percent, 0.0f, 100.0f);
+    if (percent > 0 && percent < _config.minSpinPercentage)
+        percent = _config.minSpinPercentage;
 
-    // Map percent to min/max equivalent pulse
-    // This keeps D-Shot consistent with MotorESC / ThrustStand facade
-    float scaledPercent = percent;
+    uint16_t value = (percent <= 0.0f) ? 0 : (uint16_t)(percent * (DSHOT_MAX_THROTTLE - DSHOT_MIN_THROTTLE) / 100.0f);
 
-    // Optional: if you want to use stored pulse range for scaling
-    // scaledPercent = map(percent, 0.0f, 100.0f,
-    //                     _minPulseUsEquivalent, _maxPulseUsEquivalent);
+    uint16_t packet = makePacket(value, false);
 
-    // Convert to D-Shot command value
-    uint16_t value = MIN_COMMAND + scaledPercent * (MAX_COMMAND - MIN_COMMAND) / 100.0f;
-
-    // Build the 16-bit D-Shot packet
-    _currentPacket = makePacket(value, false);
+    sendPacket(packet);
 }
 
-void DShotEscDriver::writeStop()
+void DShotEscDriver::writeIdle()
 {
 
-    _currentPacket = makePacket(MIN_COMMAND, false);
+    uint16_t packet = makePacket(0, false);
+    sendPacket(packet);
 }
 
 uint16_t DShotEscDriver::makePacket(uint16_t value, bool telemetry)
@@ -134,69 +153,67 @@ uint16_t DShotEscDriver::makePacket(uint16_t value, bool telemetry)
 
 void DShotEscDriver::sendPacket(uint16_t packet)
 {
-    rmt_item32_t items[16]; // 16 bits per packet
     for (int i = 0; i < 16; i++)
     {
         bool bit = (packet & (1 << (15 - i))) != 0;
-        if (bit)
-        {
-            items[i].duration0 = _t1HighTicks;
-            items[i].level0 = 1;
-            items[i].duration1 = _t1LowTicks;
-            items[i].level1 = 0;
-        }
-        else
-        {
-            items[i].duration0 = _t0HighTicks;
-            items[i].level0 = 1;
-            items[i].duration1 = _t0LowTicks;
-            items[i].level1 = 0;
-        }
+        _rmt_packet[i].level0 = 1;
+        _rmt_packet[i].duration0 = bit ? _t1HighTicks : _t0HighTicks;
+        _rmt_packet[i].level1 = 0;
+        _rmt_packet[i].duration1 = bit ? _t1LowTicks : _t0LowTicks;
     }
 
-    rmt_write_items((rmt_channel_t)_rmtChannel, items, 16, true);
-    // rmt_wait_tx_done((rmt_channel_t)_rmtChannel, portMAX_DELAY);
-}
+    // The Gap / Reset period
+    _rmt_packet[16].level0 = 0;
+    _rmt_packet[16].duration0 = (uint16_t)_gapTicks;
+    _rmt_packet[16].level1 = 0;
+    _rmt_packet[16].duration1 = 0; // Crucial: 0 duration signals end of frame
 
-bool DShotEscDriver::setPulseRangeUs(uint16_t minUs, uint16_t maxUs)
-{
-    if (minUs >= maxUs)
-        return false;
-
-    // Save the range for ThrustStand / MotorESC queries
-    _minPulseUsEquivalent = minUs;
-    _maxPulseUsEquivalent = maxUs;
-
-    return true;
+    // Push to hardware
+    rmt_write_items(_rmtChannel, _rmt_packet, 17, false);
 }
 
 void DShotEscDriver::computeTimings()
 {
     uint32_t bitTimeNs;
+    uint32_t targetFrameUs = 83; // 1/12000Hz ≈ 83.33 microseconds
 
     switch (_rate)
     {
-    case DShotRate::DSHOT150:
-        bitTimeNs = 6666;
-        break;
     case DShotRate::DSHOT300:
         bitTimeNs = 3333;
         break;
     case DShotRate::DSHOT600:
         bitTimeNs = 1666;
         break;
+    case DShotRate::DSHOT1200:
+        bitTimeNs = 833;
+        break;
     default:
         bitTimeNs = 3333;
         break;
     }
 
-    // RMT tick = 12.5 ns (80 MHz APB)
-    uint32_t ticks = (bitTimeNs * 80) / 1000; // ns → ticks
+    // RMT tick = 12.5 ns (at 80 MHz APB)
+    uint32_t ticksPerBit = (bitTimeNs * 80) / 1000;
 
-    _t0HighTicks = ticks * 3 / 8;
-    _t0LowTicks = ticks - _t0HighTicks;
-    _t1HighTicks = ticks * 6 / 8;
-    _t1LowTicks = ticks - _t1HighTicks;
+    _t0HighTicks = ticksPerBit * 3 / 8;
+    _t0LowTicks = ticksPerBit - _t0HighTicks;
+    _t1HighTicks = ticksPerBit * 6 / 8;
+    _t1LowTicks = ticksPerBit - _t1HighTicks;
+
+    // Calculate Gap: Target (83us) - Data (16 bits * bitTime)
+    uint32_t dataDurationUs = (bitTimeNs * 16) / 1000;
+    if (dataDurationUs < targetFrameUs)
+    {
+        uint32_t rawGap = (targetFrameUs - dataDurationUs) * 80;
+        // RMT duration is a 15-bit field (max 32767)
+        _gapTicks = (rawGap > 32767) ? 32767 : rawGap;
+    }
+    else
+    {
+        // For DShot150, the packet is ~106us, so we just use a minimum reset gap
+        _gapTicks = 1600; // Minimum 20us reset
+    }
 }
 
 bool DShotEscDriver::setRate(DShotRate rate)
@@ -214,23 +231,32 @@ bool DShotEscDriver::setRate(DShotRate rate)
     return true;
 }
 
-void DShotEscDriver::stop()
-{
-    if (_initialized)
-    {
-        ESP_LOGI(TAG, "stop");
-        writeStop();
-        rmt_driver_uninstall(_rmtChannel);
-        rmtChannelUsed[_rmtChannel] = false;
-        _channelFound = false;
-        _initialized = false;
-    }
-}
-
-void DShotEscDriver::update()
+void DShotEscDriver::deinit()
 {
     if (!_initialized)
         return;
 
-    sendPacket(_currentPacket);
+    ESP_LOGI(TAG, "Deinitialization DShot on pin %d", _pin);
+
+    // 1. Force the RMT to stop looping immediately
+    // This prevents the hardware from trying to read the buffer while we delete the driver
+    rmt_tx_stop(_rmtChannel);
+
+    // 2. Set pin to a safe state
+    digitalWrite(_pin, LOW);
+    pinMode(_pin, INPUT);
+
+    // 3. Uninstall the driver
+    // This frees the internal ring buffers and heap memory
+    esp_err_t err = rmt_driver_uninstall(_rmtChannel);
+    if (err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Failed to uninstall RMT driver: %s", esp_err_to_name(err));
+    }
+
+    // 4. Reset management flags
+    rmtChannelUsed[_rmtChannel] = false;
+    _initialized = false;
+
+    ESP_LOGI(TAG, "DShot deinitialized safely.");
 }

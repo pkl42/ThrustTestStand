@@ -4,14 +4,18 @@
 <head>
     <meta charset="UTF-8">
     <title>Motor Thrust Test Stand</title>
-	<link rel="stylesheet" href="style.css">	
+	<link rel="stylesheet" href="/css/style.css">	
 
 </head>
 
 <body>
 
+	<div id="passthroughBanner" class="mode-banner">
+		ESC PASSTHROUGH ACTIVE — Motor control disabled
+	</div>
+
     <h1 id="page-title">Motor Thrust Test Stand</h1>
-	<button id="themeToggle" onclick="toggleTheme()">
+	<button id="ui_toggle_theme">
     🌙 / ☀
 	</button>
 	<h2></h2>
@@ -24,7 +28,7 @@
 			<div>
 				<div class="field">
 					<label>Throttle:</label>
-					<input type="range" id="throttle" min="0" max="100" oninput="onThrottleChange(this.value)">
+					<input id="throttle" type="range" min="0" max="100">
 					<span id="throttleVal">0</span> %
 				</div>
 				<div class="field"><label>Thrust:</label> <span id="thrust">0</span> gf</div>
@@ -61,9 +65,21 @@
 					<span id="safetyTripValue">0</span>
 				</div>
 				<div class="field button-group">
-					<button onclick="clearSafetyTrip()">Clear Safety Trip</button>
+					<button data-action="post"
+						data-api="/api/safety/clear"
+						data-command="clear"
+						data-section="safety">
+						Clear Safety Trip</button>
 				</div>
-				<div class="field button-group"><button onclick="tare(event)">Tare Sensors</button></div>
+				<div class="field button-group">
+					<button 
+						data-action="post"
+						data-api="/api/live/tare"
+						data-command="tare"
+						data-section="live">
+						Tare Sensors
+					</button>
+				</div>
 			</div>
 		</div>
 	</section>
@@ -103,11 +119,6 @@
 					<span id="actDurationS">0</span> s
 				</div>
 				
-				<div class="field">
-					<label>Sample Count:</label>
-					<span id="thrust_samples">0</span>
-				</div>
-
 			</div>
 
 			<!-- Middle column -->
@@ -173,17 +184,23 @@
 				</div>
 
 				<div class="field button-group">
-					<button onclick="startTest()" id="test.start">Start Test</button>
+					<button id="test_start">Start Test</button>
 				</div>
 				<div class="field button-group">
-					<button onclick="stopTest()">Stop Test</button>
+					<button 
+						data-action="post"
+						data-api="/api/test/stop"
+						data-command="stop"
+						data-section="test">
+						Stop Test
+					</button>
 				</div>
 				<div class="field button-group">
-					<button onclick="downloadMeanCSV()">Download Mean CSV</button>
+					<button id="test_export_meanCSV">Download Mean CSV</button>
 				</div>
 
 				<div class="field button-group">
-					<button onclick="downloadStatsCSV()">Download Statistics CSV</button>
+					<button id="test_export_statsCSV">Download Statistics CSV</button>
 				</div>
 				
 			</div>
@@ -218,7 +235,7 @@
 				</div>
 
 				<div  class="field button-group">
-					<button id="armMotorBtn" onclick="toggleMotor(latestMotorMount)">Arm Motor</button>
+					<button id="system_armMotor">Arm Motor</button>
 				</div>
 				
 				<div class="setup-row-3">
@@ -232,26 +249,45 @@
 					<button
 					  data-api="/api/calibration"
 					  data-params="motor.disarm_timeout_s"
-					  data-action="post+refresh"
-					  data-loader="loadCalibration"
-					  onclick="handleAction(this)"
+					  data-action="post"
 					  data-section="motor.disarm_timeout_s">
 					  Set
 					</button>
-				
+				    
 				</div>
+				
+				
+
 				
 
 			</div>
 			<!-- Right column -->
 			<div>
 				<div  class="field button-group">
-					<button id="initializeBtn" onclick="initializeSystem()">Initialize System</button>
+					<button 
+						data-action="post"
+						data-api="/api/system/initialize"
+						data-section="system">
+						Initialize System
+					</button>
 				</div>
-			</div>			
+				<hr>
+				<div class="setup-row-3">
+					<label for="system.mode">Operating Mode:</label>
+					<select id="system.mode"
+						data-api="/api/system/mode"
+						data-section="system"
+						data-params="system.mode"
+						data-action="post">
+						<option value="MODE_TEST">Test Mode</option>
+						<option value="MODE_ESC_PASSTHROUGH">ESC Passthrough</option>
+					</select>
+				</div>	
+			</div>	
+
 		</div>
 	</section>
-	
+
 	
 	<section id="safety">
 		<h2>Safety Limits</h2>
@@ -284,8 +320,7 @@
 				<div class="setup-row-3">
 					<label for="limits.battery_cells">Battery Cells:</label>
 					<select id="limits.battery_cells"
-							data-section="safety"
-							onchange="handleBatteryPresetChange(this)">
+							data-section="safety">
 					</select>
 				</div>
 				<div class="setup-row-3">
@@ -304,9 +339,7 @@
 					<button
 						data-api="/api/safety"
 						data-params="limits.*"
-						data-action="post+refresh"
-						data-loader="loadSafetySettings"
-						onclick="handleAction(this)"
+						data-action="post"
 						data-section="safety">
 						Save Safety Limits
 					</button>
@@ -326,7 +359,7 @@
 
 
 	<section id="calibration">
-		<h2>Calibration</h2>
+		<h2>Calibration / Setup</h2>
 
 			
 		<div class="three-col">
@@ -340,8 +373,6 @@
 					  data-api="/api/calibration"
 					  data-params="thrust.cal"
 					  data-action="post"
-					  data-loader="loadCalibration"
-					  onclick="handleAction(this)"
 					  data-section="thrust.cal">
 					  Set
 					</button>
@@ -372,17 +403,27 @@
 						  data-api="/api/calibration"
 						  data-params="torque.distance_mm"
 						  data-action="post"
-						  data-loader="loadCalibration"
-						  onclick="handleAction(this)"
 						  data-section="torque.cal">
 						  Set Torque Calibration
 						</button>
 					</div>
+					
 				</div>
+				<hr>
+				<div class="setup-row-3">
 
-			</div>
-			<!-- Middle column -->
-			<div>
+					<label for="voltage.calibration">Voltage Calibration:</label>
+					<input type="number" id="voltage.calibration" step="0.01" data-section="voltage.calibration">
+					<button
+						  data-api="/api/calibration"
+						  data-params="voltage.calibration"
+						  data-action="post"
+     					   data-section="voltage.calibration">
+						  Set
+						</button>
+	
+				</div>
+				<hr>
 				<div class="setup-row-3">
 
 					<label for="current.sensitivity">Current Sensitivity (voltsPerAmp):</label>
@@ -391,14 +432,12 @@
 					  data-api="/api/calibration"
 					  data-params="current.sensitivity"
 					  data-action="post"
-					  data-loader="loadCalibration"
-					  onclick="handleAction(this)"
 					  data-section="current.sensitivity">
 					  Set
 					</button>
 
 				</div>
-			
+				
 				<div class="setup-row-3">
 					<label for="actual_current">Actual Current (A):</label>
 					<input type="number" id="actual_current" step="0.01" placeholder="Enter known current from PSU" data-section="actual_current">
@@ -406,30 +445,84 @@
 					  data-api="/api/calibration/calibrate_current"
 					  data-params="actual_current"
 					  data-action="post"
-					  data-loader="loadCalibration"
-					  onclick="handleAction(this)"
 					  data-section="actual_current">
 					  Set
 					</button>
 					<hr>
 				</div>
+			</div>
+			<!-- Middle column -->
+			<div>
 
-				<div class="setup-row-3">
 
-				<label for="voltage.calibration">Voltage Calibration:</label>
-				<input type="number" id="voltage.calibration" step="0.01" data-section="voltage.calibration">
-				<button
-					  data-api="/api/calibration"
-					  data-params="voltage.calibration"
-					  data-action="post"
-					  data-loader="loadCalibration"
-					  onclick="handleAction(this)"
-					   data-section="voltage.calibration">
-					  Set
-					</button>
-				<hr>
-				</div>
+				<div class="setup-group">
+					<div class="setup-title">RPM Calibration</div>
 
+					<div class="setup-row">
+						<label for="rpm.pulsesPerRevolution">Pulses per Revolution:</label>
+						<input type="number" id="rpm.pulsesPerRevolution" step="1" data-section="rpm">
+					</div>
+
+					<div class="setup-row">
+						<label for="rpm.updateRate"
+							   title="How quickly RPM reacts to changes. Fast = quick updates but more noise. Stable = smoother but slower response.">
+							Responsiveness:
+						</label>
+						<select id="rpm.updateRate" data-params="rpm.updateRate" data-section="rpm"></select>
+					</div>
+					
+					<div class="setup-row">
+						<label for="rpm.filterStrength"
+							   title="Filters electrical noise on the signal. Strong = cleaner signal but may miss very fast pulses. Weak = more responsive but noisier.">
+							Noise Filter Strength:
+						</label>
+						<select id="rpm.filterStrength"  data-params="rpm.filterStrength" data-section="rpm"></select>
+					</div>	
+
+					<div class="setup-row">
+						<label for="rpm.smoothing"
+							   title="Smooths the RPM value. Higher smoothing reduces fluctuations but adds delay to changes.">
+							Smoothing:
+						</label>
+						<select id="rpm.smoothing" data-params="rpm.smoothing" data-section="rpm"></select>
+					</div>						
+
+					<div class="setup-row">
+						<span></span>
+						<button
+						  data-api="/api/calibration"
+						  data-params="rpm.*"
+						  data-action="post"
+						  data-section="rpm">
+						  Set RPM Calibration
+						</button>
+					</div>
+				</div>	
+				
+				<div class="setup-group">
+					<div class="setup-title">Temperature Calibration</div>
+
+					<div class="setup-row">
+						<label for="temp.coefficient">Temp-Coefficient:</label>
+						<input type="number" id="temp.coefficient" step="0.01" data-section="temperature">
+					</div>
+
+					<div class="setup-row">
+						<label for="temp.offset">Offset:</label>
+						<input type="number" id="temp.offset" step="0.01" data-section="temperature">
+					</div>
+
+					<div class="setup-row">
+						<span></span>
+						<button
+						  data-api="/api/calibration"
+						  data-params="temp.coefficient,temp.offset"
+						  data-action="post"
+						  data-section="temperature">
+						  Set Temperature Calibration
+						</button>
+					</div>
+				</div>	
 
 			</div>
 			<!-- Right column -->
@@ -446,30 +539,37 @@
 						<label for="motor.pwm_max_us">Max Pulse (µs):</label>
 						<input type="number" id="motor.pwm_max_us" step="1" data-section="motor_pwm">
 					</div>
+					
+					<div class="setup-row">
+						<label for="motor.min_spin_percent">Min. Spin (%):
+						</label>
+						<input type="number" id="motor.min_spin_percent" step="1" data-section="motor_pwm">
+					</div>
 
 					<div class="setup-row">
 						<span></span>
 						<button
 						  data-api="/api/calibration"
-						  data-params="motor.pwm_max_us,motor.pwm_min_us"
+						  data-params="motor.pwm_max_us,motor.pwm_min_us,motor.min_spin_percent"
 						  data-action="post"
-						  data-loader="loadCalibration"
-						  onclick="handleAction(this)"
 						  data-section="motor_pwm">
 						  Set ESC PWM Range
 						</button>
 					</div>
 					
 				</div>
+				<hr>
 				<div class="setup-row-3">
-					<label for="motor.esc_driver_type">ESC Protocol:</label>
+					<label for="motor.esc_driver_type"
+					title="Protocol change only available when motor is unarmed.">
+					ESC Protocol:
+					</label>
 					<select
 						id="motor.esc_driver_type"
 						data-api="/api/calibration"
 						data-section="motor.esc_driver_type"
 						data-params="motor.esc_driver_type"
-						data-action="post"
-						onchange="handleAction(this)">
+						data-action="post">
 					</select>
 				</div>
 			</div>
@@ -501,13 +601,12 @@
 
 		  <div class="field button-group">
 			<input type="file"
-				   id="protocol_file_repo"
-				   accept=".json"
-				   onchange="uploadProtocolToRepo()">
+				   id="protocol_file_upload"
+				   accept=".json">
 		  </div>
 
 		  <div class="field button-group">
-			<button onclick="deleteSelectedProtocolRepo()">
+			<button id="protocol_delete_protocol"">
 			  Delete Selected Protocol
 			</button>
 		  </div>
@@ -536,8 +635,71 @@
 
 	  </div>
 	</section>
+	
+	<section id="connection">
+		<h2>Connection Settings</h2>
 
-<script src="main.js"></script>	
+		<div class="three-col">
+			<!-- LEFT: Access Point -->
+			<div>
+				<div class="setup-row-3">
+					<label for="network.ap_ssid">AP SSID:</label>
+					<input type="text" id="network.ap_ssid" maxlength="32" placeholder="AP SSID" data-section="network">
+
+				</div>
+				<div class="setup-row-3">
+					<label for="network.ap_password">AP Password:</label>
+					<input type="password" id="network.ap_password" maxlength="64" placeholder="leave blank to keep the current password" data-section="network">
+					<button id="network_toggle_ap_password" data-target-id="network.ap_password">👁</button>
+				</div>
+				<div class="setup-row-3">
+					<label for="network.ap_ip">AP IP:</label>
+					<input type="text" id="network.ap_ip" placeholder="192.168.7.1" data-section="network">
+				</div>
+				<div class="setup-row-3">
+					<label for="network.ap.gateway">Gateway:</label>
+					<input type="text" id="network.ap_gateway" placeholder="192.168.7.1" data-section="network">
+				</div>
+				<div class="setup-row-3">
+					<label for="network.ap_subnet">Subnet:</label>
+					<input type="text" id="network.ap_subnet" placeholder="255.255.255.0" data-section="network">
+				</div>
+			</div>
+
+			<!-- MIDDLE: Station -->
+			<div>
+				<div class="setup-row-3">
+					<label for="network.sta_ssid">STA SSID:</label>
+					<input type="text" id="network.sta_ssid" maxlength="32" placeholder="Local WiFi SSID" data-section="network">
+				</div>
+				<div class="setup-row-3">
+					<label for="network.sta_password">STA Password:</label>
+					<input type="password" id="network.sta_password" maxlength="64" placeholder="leave blank to keep the current password" data-section="network">
+					<button id="network_toggle_sta_password" data-target-id="network.sta_password">👁</button>
+				</div>
+				<div class="field button-group" style="margin-top: 1em;">
+					<button data-api="/api/network"
+						  data-params="network.*"
+						  data-action="post"
+						  data-section="network">Save Settings</button>
+				</div>
+			</div>
+
+			<!-- RIGHT: Actions / Status -->
+			<div>
+				<div class="setup-row-3">
+					<label>STA Connection:</label>
+					<span id="network.sta_status">—</span>
+				</div>
+				<div class="field button-group">
+					<button id="network_reconnect_sta">Reconnect STA</button>
+				</div>
+			</div>
+		</div>
+	</section>
+
+
+<script type="module" src="/js/main.js"></script>
 
 </body>
 

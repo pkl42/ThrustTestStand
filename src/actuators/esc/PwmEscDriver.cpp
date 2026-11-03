@@ -15,7 +15,7 @@ PwmEscDriver::PwmEscDriver(uint8_t pin, uint16_t freq, uint8_t resolution, uint8
 {
 }
 
-bool PwmEscDriver::begin()
+bool PwmEscDriver::init()
 {
     if (_initialized)
         return _initialized;
@@ -56,7 +56,7 @@ bool PwmEscDriver::begin()
         return _initialized;
     }
 
-    writeStop();
+    writeIdle();
     ESP_LOGI(TAG, "PWM ESC ready on pin %d (%d Hz)", _pin, _freq);
     _initialized = true;
     return _initialized;
@@ -64,37 +64,44 @@ bool PwmEscDriver::begin()
 
 void PwmEscDriver::writeThrottle(float percent)
 {
+
     percent = constrain(percent, 0.0f, 100.0f);
-    uint16_t pulse = map(percent * 100, 0, 10000, _minPulseUs, _maxPulseUs);
+    if (percent > 0 && percent < _config.minSpinPercentage)
+        percent = _config.minSpinPercentage;
+
+    uint16_t pulse = map(percent * 100, 0, 10000, _config.minPulseUs, _config.maxPulseUs);
+
     setPulseWidth(pulse);
 }
 
-void PwmEscDriver::writeStop()
+void PwmEscDriver::writeIdle()
 {
     if (_initialized)
-        setPulseWidth(_minPulseUs);
+        setPulseWidth(_config.minPulseUs);
 }
 
-bool PwmEscDriver::setPulseRangeUs(uint16_t minUs, uint16_t maxUs)
+bool PwmEscDriver::setConfig(ESCConfig &config)
 {
-    if (minUs >= maxUs)
+    if (config.minPulseUs >= config.maxPulseUs)
         return false;
 
-    if (minUs < 800 || maxUs > 2200)
+    if (config.minPulseUs < 800 || config.maxPulseUs > 2200)
         return false;
 
-    _minPulseUs = minUs;
-    _maxPulseUs = maxUs;
+    if (config.minSpinPercentage < 0 || config.minSpinPercentage > 20)
+        return false;
 
-    writeStop();
+    _config = config;
+
+    writeIdle();
     return true;
 }
 
 void PwmEscDriver::setPulseWidth(uint16_t pulseUs)
 {
-    pulseUs = constrain(pulseUs, _minPulseUs, _maxPulseUs);
+    _pulseUs = constrain(pulseUs, _config.minPulseUs, _config.maxPulseUs);
     uint32_t periodUs = 1000000 / _freq;
-    float dutyRatio = (float)pulseUs / periodUs;
+    float dutyRatio = (float)_pulseUs / periodUs;
     uint32_t duty = dutyRatio * _maxDuty;
     duty = constrain(duty, 0, _maxDuty);
 
@@ -102,12 +109,28 @@ void PwmEscDriver::setPulseWidth(uint16_t pulseUs)
     ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)_channel);
 }
 
-void PwmEscDriver::stop()
+void PwmEscDriver::deinit()
 {
-    if (_initialized)
-    {
-        ESP_LOGI(TAG, "stop");
-        writeStop();
-        _initialized = false;
-    }
+    if (!_initialized)
+        return;
+
+    ESP_LOGI(TAG, "Deinitialization PWM on pin %d", _pin);
+
+    // Step 1: set safe state
+    writeIdle();
+    // Optionally set pin LOW
+    ledcWrite(_channel, 0);
+    _pulseUs = 0;
+
+    // Step 2: let ESC see one full period
+    ets_delay_us(20000); // 20 ms for 50 Hz PWM
+
+    // Step 3: stop PWM and detach pin
+    // Stop PWM signal generation
+    ledc_stop(LEDC_LOW_SPEED_MODE, (ledc_channel_t)_channel, 0);
+
+    // Detach/reset pin
+    gpio_reset_pin((gpio_num_t)_pin);
+
+    _initialized = false;
 }

@@ -8,218 +8,243 @@
 
 const char *RpmSensor::TAG = "RpmSensor";
 
-/* ========= Static ISR-shared data ========= */
-
-RpmSensor *RpmSensor::_instance = nullptr;
-
-volatile uint32_t RpmSensor::_pulseCount = 0;
-volatile uint32_t RpmSensor::_lastPulseTimeUs = 0;
-volatile uint32_t RpmSensor::_pulseIntervalUs = 0;
+/* ========= Lifecycle ========= */
 
 RpmSensor::~RpmSensor()
 {
-    /* Detach interrupt if this instance is active */
-    if (_instance == this)
-    {
-        detachInterrupt(digitalPinToInterrupt(_pin));
-        _instance = nullptr;
-    }
-
-    /* Free buffers */
-    if (_periodBuffer)
-    {
-        delete[] _periodBuffer;
-        _periodBuffer = nullptr;
-    }
-
-    if (_averageBuffer)
-    {
-        delete[] _averageBuffer;
-        _averageBuffer = nullptr;
-    }
-
-    /* Reset state */
-    _rpm = 0.0f;
-    setDataValid(false);
-    setState(SensorState::SENSOR_UNINITIALIZED);
+    deinit();
 }
 
-/* ========= Public API ========= */
+/* ========= Initialization ========= */
 
-bool RpmSensor::begin(uint8_t pin,
-                      const RpmSensorConfig &config)
+bool RpmSensor::begin(uint8_t pin, const RpmUiConfig &config)
 {
     if (isReady())
     {
-        if (_lastPulseTimeUs == 0 && millis() > 2000)
-        {
-            ESP_LOGW(TAG, "RPM READY but no pulses → auto-reset");
-        }
-        else
-        {
-            ESP_LOGI(TAG, "RPM Sensor READY → reinitializing");
-        }
-
-        reset(true); // ALWAYS force re-arm
+        ESP_LOGW(TAG, "Already initialized");
         return true;
     }
 
     _pin = pin;
-    ESP_LOGI(TAG, "Initialize RPM Sensor on pin: %d ...", pin);
+
     setState(SensorState::SENSOR_INITIALIZING);
 
-    _instance = this;
+    // Apply config BEFORE init
+    _uiConfig = config;
+    _config = convertUIConfigToRuntime(config);
 
-    _config = config;
-    _config.pulsesPerRevolution = _config.pulsesPerRevolution > 0 ? _config.pulsesPerRevolution : 1;
+    if (_config.pulsesPerRevolution == 0)
+        _config.pulsesPerRevolution = 1;
 
-    _rpm = 0.0f;
-    setDataValid(false);
+    ESP_LOGI(TAG, "Init PCNT RPM on pin %d", _pin);
 
-    /* Allocate buffers (instance-owned) */
-    _periodBuffer = new uint32_t[_config.periodBufferSize]();
-    _averageBuffer = new uint32_t[_config.averageBufferSize]();
-
-    if (!_periodBuffer || !_averageBuffer)
+    if (!initPCNT())
     {
-        ESP_LOGE(TAG, "Buffer allocation failed");
+        ESP_LOGE(TAG, "PCNT init failed");
         setState(SensorState::SENSOR_ERROR);
         incrementError();
         return false;
     }
 
-    _periodBufferIndex = 0;
-    _averageBufferIndex = 0;
-    _thresholdPeriod = 0;
-
-    /* Reset ISR data */
-    noInterrupts();
-    _pulseCount = 0;
-    _lastPulseTimeUs = 0;
-    _pulseIntervalUs = 0; // prevents a phantom RPM spike after reset.
-    interrupts();
-
-    pinMode(_pin, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(_pin), pulseCounter, FALLING);
-
-    ESP_LOGI(TAG,
-             "RPM Sensor pin=%d PPR=%d avgBuf=%d periodBuf=%d",
-             _pin,
-             _config.pulsesPerRevolution,
-             _config.averageBufferSize,
-             _config.periodBufferSize);
+    reset();
 
     setState(SensorState::SENSOR_READY);
-    ESP_LOGI(TAG, "RPM Sensor initialized.");
+    ESP_LOGI(TAG, "RPM Sensor (PCNT) ready");
+
     return true;
 }
 
-void RpmSensor::reset(bool detachIrq)
+/* ========= Config Handling ========= */
+
+bool RpmSensor::setUIConfig(const RpmUiConfig &uiConfig)
 {
-    ESP_LOGI(TAG, "Reset RPM Sensor");
+    if (_uiConfig == uiConfig)
+        return false;
 
-    if (detachIrq)
-        detachInterrupt(digitalPinToInterrupt(_pin));
+    RpmSensorConfig newCfg = convertUIConfigToRuntime(uiConfig);
 
-    noInterrupts();
-    _pulseCount = 0;
-    _lastPulseTimeUs = 0;
-    _pulseIntervalUs = 0;
-    interrupts();
+    bool filterChanged =
+        (newCfg.filterCycles != _config.filterCycles);
+
+    bool timingChanged =
+        (newCfg.sampleTimeMs != _config.sampleTimeMs);
+
+    bool smoothingChanged =
+        (newCfg.alpha != _config.alpha);
+
+    bool pprChanged =
+        (newCfg.pulsesPerRevolution != _config.pulsesPerRevolution);
+
+    _uiConfig = uiConfig;
+    _config = newCfg;
+
+    if (!isReady())
+        return true;
+
+    // --- Apply runtime changes ---
+    if (filterChanged)
+    {
+        ESP_LOGI(TAG, "Updating PCNT filter");
+        applyPcntFilter();
+    }
+
+    if (timingChanged || smoothingChanged || pprChanged)
+    {
+        ESP_LOGI(TAG, "Resetting filter state due to config change");
+        reset(); // ensures stable transition
+    }
+
+    return true;
+}
+
+/* ========= Conversion ========= */
+
+RpmSensor::RpmSensorConfig
+RpmSensor::convertUIConfigToRuntime(const RpmUiConfig &ui)
+{
+    RpmSensorConfig cfg;
+
+    cfg.pulsesPerRevolution = ui.pulsesPerRevolution;
+    cfg.sampleTimeMs = rpmResponseToSampleTime(ui.responseMode);
+    cfg.filterCycles = rpmFilterToCycles(ui.filterLevel);
+    cfg.alpha = rpmSmoothingToAlpha(ui.smoothing);
+    cfg.timeoutMs = 2000;
+
+    return cfg;
+}
+
+/* ========= PCNT Setup ========= */
+
+bool RpmSensor::initPCNT()
+{
+    pcnt_config_t pcnt_config = {};
+    pcnt_config.pulse_gpio_num = _pin;
+    pcnt_config.ctrl_gpio_num = PCNT_PIN_NOT_USED;
+    pcnt_config.channel = PCNT_CHANNEL_0;
+    pcnt_config.unit = _pcntUnit;
+
+    pcnt_config.pos_mode = PCNT_COUNT_INC;
+    pcnt_config.neg_mode = PCNT_COUNT_DIS;
+
+    pcnt_config.lctrl_mode = PCNT_MODE_KEEP;
+    pcnt_config.hctrl_mode = PCNT_MODE_KEEP;
+
+    pcnt_config.counter_h_lim = 32767;
+    pcnt_config.counter_l_lim = 0;
+
+    if (pcnt_unit_config(&pcnt_config) != ESP_OK)
+        return false;
+
+    applyPcntFilter();
+
+    pcnt_counter_pause(_pcntUnit);
+    pcnt_counter_clear(_pcntUnit);
+    pcnt_counter_resume(_pcntUnit);
+
+    return true;
+}
+
+void RpmSensor::applyPcntFilter()
+{
+    pcnt_counter_pause(_pcntUnit);
+
+    pcnt_set_filter_value(_pcntUnit, _config.filterCycles);
+    pcnt_filter_enable(_pcntUnit);
+
+    pcnt_counter_resume(_pcntUnit);
+}
+
+void RpmSensor::deinitPCNT()
+{
+    pcnt_counter_pause(_pcntUnit);
+    pcnt_counter_clear(_pcntUnit);
+    pcnt_filter_disable(_pcntUnit);
+}
+
+/* ========= Deinit ========= */
+
+void RpmSensor::deinit()
+{
+    if (!isReady())
+        return;
+
+    ESP_LOGI(TAG, "Deinit RPM Sensor (PCNT)");
+
+    deinitPCNT();
+
+    setState(SensorState::SENSOR_UNINITIALIZED);
+}
+
+/* ========= Reset ========= */
+
+void RpmSensor::reset()
+{
+    if (!isReady())
+        return;
+
+    pcnt_counter_pause(_pcntUnit);
+    pcnt_counter_clear(_pcntUnit);
+    pcnt_counter_resume(_pcntUnit);
+
+    _lastSampleTimeMs = millis();
+    _lastPulseTimeMs = millis();
 
     _rpm = 0.0f;
-    _thresholdPeriod = 0;
-
-    if (_periodBuffer)
-        memset(_periodBuffer, 0, sizeof(uint32_t) * _config.periodBufferSize);
-
-    if (_averageBuffer)
-        memset(_averageBuffer, 0, sizeof(uint32_t) * _config.averageBufferSize);
-
-    _periodBufferIndex = 0;
-    _averageBufferIndex = 0;
+    _rpmFiltered = 0.0f;
 
     setDataValid(false);
     _updateCount = 0;
-
-    if (detachIrq)
-        attachInterrupt(digitalPinToInterrupt(_pin), pulseCounter, FALLING);
-
-    setState(SensorState::SENSOR_READY);
 }
+
+/* ========= Update ========= */
 
 bool RpmSensor::update()
 {
     if (!isReady())
         return false;
 
-    uint32_t intervalUs;
-    uint32_t lastPulseUs;
+    uint32_t now = millis();
+    uint32_t dt = now - _lastSampleTimeMs;
 
-    /* Copy ISR data atomically */
-    noInterrupts();
-    intervalUs = _pulseIntervalUs;
-    lastPulseUs = _lastPulseTimeUs;
-    interrupts();
+    if (dt < _config.sampleTimeMs)
+        return false;
 
-    uint32_t nowMs = millis();
+    int16_t count = 0;
+    pcnt_get_counter_value(_pcntUnit, &count);
+    pcnt_counter_clear(_pcntUnit);
 
-    /* Timeout → RPM = 0 */
-    if (lastPulseUs == 0 ||
-        (nowMs - (lastPulseUs / 1000)) > _config.timeoutMs)
+    _lastSampleTimeMs = now;
+
+    if (count > 0)
+        _lastPulseTimeMs = now;
+
+    if ((now - _lastPulseTimeMs) > _config.timeoutMs)
     {
         _rpm = 0.0f;
-        _thresholdPeriod = 0;
-
-        memset(_periodBuffer, 0, sizeof(uint32_t) * _config.periodBufferSize);
-        memset(_averageBuffer, 0, sizeof(uint32_t) * _config.averageBufferSize);
-
-        _periodBufferIndex = 0;
-        _averageBufferIndex = 0;
-
+        _rpmFiltered = 0.0f;
         setDataValid(true);
         ++_updateCount;
         return true;
     }
 
-    /* New interval available */
-    if (intervalUs > 0)
-        processNewInterval(intervalUs);
+    float dtSeconds = dt / 1000.0f;
 
-    /* Compute average RPM */
-    uint32_t minInterval = UINT32_MAX;
-    uint32_t maxInterval = 0;
-    float sum = 0.0f;
-    uint8_t count = 0;
+    float rpmRaw =
+        (count * 60.0f) /
+        (dtSeconds * _config.pulsesPerRevolution);
 
-    for (uint8_t i = 0; i < _config.averageBufferSize; i++)
-    {
-        uint32_t v = _averageBuffer[i];
-        if (v > 0)
-        {
-            sum += v;
-            count++;
-            minInterval = min(minInterval, v);
-            maxInterval = max(maxInterval, v);
-        }
-    }
+    _rpmFiltered =
+        (1.0f - _config.alpha) * _rpmFiltered +
+        _config.alpha * rpmRaw;
 
-    if (count >= 3)
-    {
-        sum -= (minInterval + maxInterval);
-        float avgInterval = sum / (count - 2);
-
-        if (avgInterval >= 500) // noise guard
-        {
-            _rpm = (60.0f * 1e6f) /
-                   (avgInterval * _config.pulsesPerRevolution);
-        }
-    }
+    _rpm = _rpmFiltered;
 
     setDataValid(true);
     ++_updateCount;
     return true;
 }
+
+/* ========= Data Access ========= */
 
 float RpmSensor::getRPM() const
 {
@@ -231,61 +256,11 @@ uint32_t RpmSensor::getPulseCount(bool resetCounter)
     if (!isReady())
         return 0;
 
-    noInterrupts();
-    uint32_t count = _pulseCount;
+    int16_t count = 0;
+    pcnt_get_counter_value(_pcntUnit, &count);
+
     if (resetCounter)
-        _pulseCount = 0;
-    interrupts();
+        pcnt_counter_clear(_pcntUnit);
 
-    return count;
-}
-
-/* ========= Processing (non-ISR) ========= */
-
-bool RpmSensor::processNewInterval(uint32_t interval)
-{
-    /* Debounce */
-    if (interval <= _config.debounceUs)
-        return false;
-
-    /* Dirty buffer */
-    _periodBuffer[_periodBufferIndex] = interval;
-    _periodBufferIndex =
-        (_periodBufferIndex + 1) % _config.periodBufferSize;
-
-    /* Compute outlier threshold */
-    uint32_t maxPeriod = 0;
-    for (uint8_t i = 0; i < _config.periodBufferSize; i++)
-        maxPeriod = max(maxPeriod, _periodBuffer[i]);
-
-    _thresholdPeriod = (uint32_t)(maxPeriod * _config.outlierThreshold);
-
-    if (_thresholdPeriod > 0 && interval < _thresholdPeriod)
-        return false;
-
-    /* Clean buffer */
-    _averageBuffer[_averageBufferIndex] = interval;
-    _averageBufferIndex =
-        (_averageBufferIndex + 1) % _config.averageBufferSize;
-
-    return true;
-}
-
-/* ========= ISR ========= */
-
-void IRAM_ATTR RpmSensor::pulseCounter()
-{
-    if (!_instance)
-        return;
-
-    uint32_t now = micros();
-    uint32_t last = _lastPulseTimeUs;
-
-    _lastPulseTimeUs = now;
-
-    if (last == 0)
-        return;
-
-    _pulseIntervalUs = now - last;
-    _pulseCount++;
+    return (uint32_t)count;
 }

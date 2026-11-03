@@ -7,6 +7,14 @@
 #include "core/SafetyLimits.h"
 #include <ArduinoJson.h>
 
+void WebServerController::sendSafetyConfig(AsyncWebSocketClient *client)
+{
+    StaticJsonDocument<256> doc; // same size as used in
+    doc["type"] = MsgType::SAFETY;
+    ApiSerializer::writeSafetyConfig(doc, _thrustStand->getSafety());
+    sendJson(doc, client);
+}
+
 void WebServerController::setupSafetyRoutes()
 {
 
@@ -27,7 +35,7 @@ void WebServerController::setupSafetyRoutes()
               {
                   ESP_LOGI("WebServerController", "/api/safety/battery-presets - HTTP_GET");
                   StaticJsonDocument<768> doc;
-                  _thrustStand->fillBatteryPresetJson(doc);
+                  ApiSerializer::writeBatteryPresetOptions(doc);
 
                   AsyncResponseStream *response =
                       request->beginResponseStream("application/json");
@@ -39,19 +47,19 @@ void WebServerController::setupSafetyRoutes()
     //
     // ── GET /api/safety  --- GET current safety settings
     //
-    server.on("/api/safety", HTTP_GET,
-              [this](AsyncWebServerRequest *request)
-              {
-                  ESP_LOGI("WebServerController", "/api/safety - HTTP_GET");
-                  StaticJsonDocument<256> doc;
-                  _thrustStand->fillSafetyJson(doc);
+    // server.on("/api/safety", HTTP_GET,
+    //           [this](AsyncWebServerRequest *request)
+    //           {
+    //               ESP_LOGI("WebServerController", "/api/safety - HTTP_GET");
+    //               StaticJsonDocument<256> doc;
+    //               _thrustStand->fillSafetyJson(doc);
 
-                  AsyncResponseStream *response =
-                      request->beginResponseStream("application/json");
+    //               AsyncResponseStream *response =
+    //                   request->beginResponseStream("application/json");
 
-                  serializeJson(doc, *response);
-                  request->send(response);
-              });
+    //               serializeJson(doc, *response);
+    //               request->send(response);
+    //           });
 
     //
     // ── POST /api/safety -- post limits
@@ -130,5 +138,6 @@ void WebServerController::setupSafetyRoutes()
             String out;
             serializeJson(resp, out);
             request->send(200, "application/json", out);
+            sendSafetyConfig();
         });
 }

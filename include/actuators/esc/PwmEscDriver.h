@@ -13,58 +13,75 @@
  * @class PwmEscDriver
  * @brief PWM-based ESC driver using ESP32 LEDC peripheral.
  *
- * Handles pulse-width modulation to control standard RC ESCs.
- * Supports configurable pulse range, frequency, and resolution.
+ * Generates a servo-style PWM signal to control standard RC ESCs.
+ * The throttle is encoded as pulse width (typically 1000–2000 µs).
+ *
+ * @note
+ * - Uses ESP32 LEDC hardware (timer + channel).
+ * - Typical ESCs expect ~50 Hz update rate.
+ * - Pulse width range is defined via @ref setConfig().
+ *
+ * @warning
+ * - Incorrect pulse ranges may prevent arming or cause unsafe behavior.
+ * - No automatic ESC calibration is performed.
+ *
+ * @see DShotEscDriver
  */
 class PwmEscDriver : public EscSignalDriver
 {
 public:
     /**
-     * @brief Construct a PWM ESC driver
+     * @brief Construct a PWM ESC driver.
      * @param pin        GPIO connected to ESC signal
-     * @param freq       PWM frequency (Hz), typically 50
-     * @param resolution PWM resolution in bits, max 16
-     * @param channel    LEDC channel
+     * @param freq       PWM frequency in Hz (typically 50)
+     * @param resolution PWM resolution in bits (max 16)
+     * @param channel    LEDC channel index
      */
     PwmEscDriver(uint8_t pin, uint16_t freq = 50, uint8_t resolution = 12, uint8_t channel = 1);
 
-    bool begin() override;
+    /**
+     * @brief Initialize LEDC timer and channel.
+     */
+    bool init() override;
+
+    /**
+     * @brief Set throttle as percentage.
+     * @param percent Throttle in range [0.0, 100.0]
+     *
+     * Converted internally to a pulse width between configured
+     * minimum and maximum values (e.g. 1000–2000 µs).
+     */
     void writeThrottle(float percent) override;
-    void writeStop() override;
 
     /**
-     * @brief Set pulse width range for 0% to 100% throttle
-     * @param minUs minimum pulse width (µs)
-     * @param maxUs maximum pulse width (µs)
+     * @brief Send idle (minimum throttle) signal.
      */
-    bool setPulseRangeUs(uint16_t minUs, uint16_t maxUs) override;
+    void writeIdle() override;
 
     /**
-     * @brief Get configured minimum PWM pulse width.
-     *
-     * @return Minimum pulse width in microseconds.
+     * @brief Apply ESC configuration (pulse range, limits, etc.).
      */
-    uint16_t getMinPulseUs() const override { return _minPulseUs; }
-    /**
-     * @brief Get configured maximum PWM pulse width.
-     *
-     * @return Maximum pulse width in microseconds.
-     */
-    uint16_t getMaxPulseUs() const override { return _maxPulseUs; }
+    bool setConfig(ESCConfig &config) override;
 
-    void stop() override;
+    /**
+     * @brief Release LEDC resources.
+     */
+    void deinit() override;
 
 private:
+    /**
+     * @brief Set raw pulse width.
+     * @param pulseUs Pulse width in microseconds
+     */
     void setPulseWidth(uint16_t pulseUs);
 
-    uint8_t _pin;
-    uint8_t _channel;
-    uint16_t _freq;
-    uint8_t _resolution;
-    uint16_t _maxDuty;
+    uint8_t _pin;        ///< Output GPIO
+    uint8_t _channel;    ///< LEDC channel
+    uint16_t _freq;      ///< PWM frequency (Hz)
+    uint8_t _resolution; ///< PWM resolution (bits)
+    uint16_t _maxDuty;   ///< Maximum duty value (derived from resolution)
 
-    uint16_t _minPulseUs = 1000;
-    uint16_t _maxPulseUs = 2000;
+    uint16_t _pulseUs = 0; ///< Last applied pulse width (µs)
 };
 
 #endif // PWM_ESC_DRIVER_H

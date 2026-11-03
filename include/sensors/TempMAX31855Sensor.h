@@ -6,7 +6,7 @@
 #ifndef TEMP_MAX31855_SENSOR_H
 #define TEMP_MAX31855_SENSOR_H
 
-#include "BaseSensor.h"
+#include "BaseTemperatureSensor.h"
 #include <Adafruit_MAX31855.h>
 
 /**
@@ -16,7 +16,7 @@
  * BaseSensor framework. It provides non-blocking temperature updates and
  * tracks data validity.
  */
-class TempMax31855Sensor : public BaseSensor
+class TempMax31855Sensor : public BaseTemperatureSensor
 {
 public:
     TempMax31855Sensor() = default;
@@ -49,19 +49,10 @@ public:
      */
     bool update() override;
 
-    /**
-     * @brief Get the last measured temperature
-     *
-     * @return Temperature in degrees Celsius.
-     *         The returned value is only valid if hasValidData() returns true.
-     */
-    float getTemperatureInCelsius() const;
-
 private:
     const char *TAG = "MAX31855_Sensor";
 
     Adafruit_MAX31855 _tc{0, 0, 0}; ///< MAX31855 driver instance (pins set in begin)
-    float _temperature{0.0f};       ///< Last valid temperature sample in °C
 };
 
 #endif // TEMP_MAX31855_SENSOR_H

@@ -6,6 +6,19 @@
 #include "comms/WebServerController.h"
 #include <ArduinoJson.h>
 
+void WebServerController::sendCalibrationConfig(AsyncWebSocketClient *client)
+{
+    if (!_thrustStand)
+        return;
+
+    StaticJsonDocument<512> doc;
+
+    doc["type"] = MsgType::CALIBRATION;
+    ApiSerializer::writeCalibrationConfig(doc, *_thrustStand);
+
+    sendJson(doc, client);
+}
+
 void WebServerController::setupCalibrationRoutes()
 {
     //
@@ -16,7 +29,7 @@ void WebServerController::setupCalibrationRoutes()
               {
                   StaticJsonDocument<256> doc;
 
-                  _thrustStand->fillESCDriverJson(doc);
+                  ApiSerializer::writeESCDriverOptions(doc);
 
                   AsyncResponseStream *response =
                       request->beginResponseStream("application/json");
@@ -24,15 +37,16 @@ void WebServerController::setupCalibrationRoutes()
                   serializeJson(doc, *response);
                   request->send(response);
               });
+
     //
-    // ── GET /api/calibration/calibrate_current
+    // ── GET /api/calibration/rpmOptions
     //
-    server.on("/api/calibration", HTTP_GET,
+    server.on("/api/calibration/rpmOptions", HTTP_GET,
               [this](AsyncWebServerRequest *request)
               {
                   StaticJsonDocument<512> doc;
 
-                  _thrustStand->fillCalibrationJson(doc);
+                  ApiSerializer::writeRpmOptions(doc);
 
                   AsyncResponseStream *response =
                       request->beginResponseStream("application/json");
@@ -40,6 +54,23 @@ void WebServerController::setupCalibrationRoutes()
                   serializeJson(doc, *response);
                   request->send(response);
               });
+    //
+    //
+    // ── GET /api/calibration/
+    //
+    // server.on("/api/calibration", HTTP_GET,
+    //           [this](AsyncWebServerRequest *request)
+    //           {
+    //               StaticJsonDocument<512> doc;
+
+    //               _thrustStand->fillCalibrationJson(doc);
+
+    //               AsyncResponseStream *response =
+    //                   request->beginResponseStream("application/json");
+
+    //               serializeJson(doc, *response);
+    //               request->send(response);
+    //           });
     //
     // ── POST /api/calibration
     //
@@ -96,6 +127,21 @@ void WebServerController::setupCalibrationRoutes()
                 }
             }
 
+            // ---------- Temperature Calibration ----------
+            if (doc.containsKey("temp"))
+            {
+                JsonObject tempObj = doc["temp"].as<JsonObject>();
+
+                float coefficient = tempObj.containsKey("coefficient") ? tempObj["coefficient"] : 1.0f;
+                float offset = tempObj.containsKey("offset") ? tempObj["offset"] : 0.0f;
+
+                if (tempObj.containsKey("offset") || tempObj.containsKey("coefficient"))
+                {
+                    _thrustStand->setTemperatueCalibration(coefficient, offset);
+                    handled = true;
+                }
+            }
+
             // ---------- Current Calibration ----------
             if (doc.containsKey("current"))
             {
@@ -124,13 +170,32 @@ void WebServerController::setupCalibrationRoutes()
             if (doc.containsKey("motor"))
             {
                 JsonObject motorObj = doc["motor"].as<JsonObject>();
-                if (motorObj.containsKey("pwm_min_us") && motorObj.containsKey("pwm_max_us"))
+                ESCConfig escConfig = _thrustStand->getESCDriverConfig();
+                bool update_flag = false;
+
+                if (motorObj.containsKey("pwm_min_us"))
                 {
-                    uint16_t minUs = motorObj["pwm_min_us"];
-                    uint16_t maxUs = motorObj["pwm_max_us"];
-                    _thrustStand->setPulseRangeUs(minUs, maxUs);
+                    escConfig.minPulseUs = motorObj["pwm_min_us"].as<uint16_t>();
+                    update_flag = true;
+                }
+                if (motorObj.containsKey("pwm_max_us"))
+                {
+                    escConfig.maxPulseUs = motorObj["pwm_max_us"].as<uint16_t>();
+                    update_flag = true;
+                }
+
+                if (motorObj.containsKey("min_spin_percent"))
+                {
+                    escConfig.minSpinPercentage = motorObj["min_spin_percent"].as<uint8_t>();
+                    update_flag = true;
+                }
+
+                if (update_flag)
+                {
+                    update_flag = _thrustStand->setESCDriverConfig(escConfig);
                     handled = true;
                 }
+
                 if (motorObj.containsKey("disarm_timeout_s"))
                 {
                     uint32_t t = motorObj["disarm_timeout_s"];
@@ -140,7 +205,40 @@ void WebServerController::setupCalibrationRoutes()
                 if (motorObj.containsKey("esc_driver_type"))
                 {
                     uint8_t t = motorObj["esc_driver_type"];
-                    handled = _thrustStand->switchDriver(static_cast<EscDriverType>(t));
+                    handled = _thrustStand->setESCDriver(static_cast<EscDriverType>(t));
+                }
+            }
+
+            // ---------- RPM Configuration ----------
+            if (doc.containsKey("rpm"))
+            {
+                JsonObject tempObj = doc["rpm"].as<JsonObject>();
+                RpmUiConfig rpmUIConfig = _thrustStand->getRPMUICalibration();
+                if (tempObj.containsKey("filterStrength"))
+                    rpmUIConfig.filterLevel =
+                        static_cast<RpmFilterLevel>(tempObj["filterStrength"].as<uint8_t>());
+
+                if (tempObj.containsKey("updateRate"))
+                    rpmUIConfig.responseMode =
+                        static_cast<RpmResponseMode>(tempObj["updateRate"].as<uint8_t>());
+
+                if (tempObj.containsKey("smoothing"))
+                    rpmUIConfig.smoothing =
+                        static_cast<RpmSmoothing>(tempObj["smoothing"].as<uint8_t>());
+
+                if (tempObj.containsKey("pulsesPerRevolution"))
+                    rpmUIConfig.pulsesPerRevolution =
+                        tempObj["pulsesPerRevolution"].as<uint8_t>();
+
+                if (tempObj.containsKey("filterStrength") ||
+                    tempObj.containsKey("updateRate") ||
+                    tempObj.containsKey("smoothing") ||
+                    tempObj.containsKey("pulsesPerRevolution"))
+                {
+
+                    bool update_flag = _thrustStand->setRPMUICalibration(rpmUIConfig);
+                    handled = true;
+                    ESP_LOGI("WebServerController", "/api/calibration - _thrustStand->setRPMUICalibration %i", update_flag);
                 }
             }
 
@@ -157,6 +255,7 @@ void WebServerController::setupCalibrationRoutes()
             {
                 request->send(400, "application/json", "{\"error\":\"Missing or invalid parameters\"}");
             }
+            sendCalibrationConfig();
         });
 
     //
@@ -181,5 +280,6 @@ void WebServerController::setupCalibrationRoutes()
             float newSens = _thrustStand->getCurrentSensitivity();
 
             request->send(200, "application/json",
-                String("{\"currentSensitivity\":") + String(newSens, 6) + "}"); });
+                String("{\"currentSensitivity\":") + String(newSens, 6) + "}");
+            sendCalibrationConfig(); });
 }

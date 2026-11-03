@@ -45,9 +45,9 @@ bool TempMax31855Sensor::update()
     if (!isReady())
         return false;
 
-    float temp = _tc.readCelsius();
+    float raw = _tc.readCelsius();
 
-    if (isnan(temp))
+    if (isnan(raw))
     {
         setDataValid(false);
         setState(SensorState::SENSOR_ERROR);
@@ -63,13 +63,9 @@ bool TempMax31855Sensor::update()
         return false;
     }
 
-    _temperature = temp;
+    _temperature = raw * _calibration.coefficient + _calibration.offset;
     setDataValid(true);
     ++_updateCount; // make sure _updateCount exists in header or remove
     return true;
 }
 
-float TempMax31855Sensor::getTemperatureInCelsius() const
-{
-    return _temperature;
-}
